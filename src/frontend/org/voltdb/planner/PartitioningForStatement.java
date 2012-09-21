@@ -116,6 +116,10 @@ public class PartitioningForStatement {
         m_inferSP = inferSP;
     }
 
+    public boolean shouldInferSP() {
+        return m_inferSP;
+    }
+
     /**
      * accessor
      */
@@ -202,6 +206,33 @@ public class PartitioningForStatement {
     public int getCountOfIndependentlyPartitionedTables() {
         return m_countOfIndependentlyPartitionedTables;
 
+    }
+
+    /**
+     * Returns the discovered single partition expression (if exists), unless the
+     * user gave a partitioning a-priori, and then it will return null.
+     */
+    public AbstractExpression effectivePartitioningExpression() {
+        if (m_lockIn) {
+            return singlePartitioningExpression();
+        }
+        return null;
+    }
+
+    /**
+     * Returns true if the statement will require two fragments.
+     */
+    public boolean requiresTwoFragments() {
+        if (getCountOfPartitionedTables() == 0) {
+            return false;
+        }
+        if (effectivePartitioningValue() != null) {
+            return false;
+        }
+        if (effectivePartitioningExpression() != null) {
+            return false;
+        }
+        return true;
     }
 
     /**

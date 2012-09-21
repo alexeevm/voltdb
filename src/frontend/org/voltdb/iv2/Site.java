@@ -18,7 +18,6 @@
 package org.voltdb.iv2;
 
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.voltcore.logging.Level;
 import org.voltcore.logging.VoltLogger;
 import org.voltcore.utils.CoreUtils;
+import org.voltcore.utils.EstTime;
 import org.voltdb.BackendTarget;
 import org.voltdb.CatalogContext;
 import org.voltdb.CatalogSpecificPlanner;
@@ -57,6 +57,8 @@ import org.voltdb.jni.ExecutionEngineJNI;
 import org.voltdb.jni.MockExecutionEngine;
 import org.voltdb.utils.LogKeys;
 
+import com.google.common.collect.ImmutableMap;
+
 public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConnection
 {
     private static final VoltLogger hostLog = new VoltLogger("HOST");
@@ -66,6 +68,8 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
 
     // HSId of this site's initiator.
     final long m_siteId;
+
+    final int m_snapshotPriority;
 
     // Partition count is important for some reason.
     final int m_numberOfPartitions;
@@ -83,6 +87,14 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
     // Manages pending tasks.
     final SiteTaskerQueue m_scheduler;
 
+    /*
+     * There is really no legit reason to touch the initiator mailbox from the site,
+     * but it turns out to be necessary at startup when restoring a snapshot. The snapshot
+     * has the transaction id for the partition that it must continue from and it has to be
+     * set at all replicas of the partition.
+     */
+    final InitiatorMailbox m_initiatorMailbox;
+
     // Almighty execution engine and its HSQL sidekick
     ExecutionEngine m_ee;
     HsqlBackend m_hsql;
@@ -91,10 +103,10 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
     private SnapshotSiteProcessor m_snapshotter;
 
     // Current catalog
-    CatalogContext m_context;
+    volatile CatalogContext m_context;
 
     // Currently available procedure
-    LoadedProcedureSet m_loadedProcedures;
+    volatile LoadedProcedureSet m_loadedProcedures;
 
     // Current topology
     int m_partitionId;
@@ -131,8 +143,10 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
     }
 
     // Advanced in complete transaction.
-    long m_lastCommittedTxnId = 0L;
+    long m_lastCommittedTxnId = 0;
+    long m_lastCommittedSpHandle = 0;
     long m_currentTxnId = Long.MIN_VALUE;
+    long m_lastTxnTime = System.currentTimeMillis();
 
     SiteProcedureConnection getSiteProcedureConnection()
     {
@@ -156,8 +170,8 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
         }
 
         @Override
-        public long getLastCommittedTxnId() {
-            return m_lastCommittedTxnId;
+        public long getLastCommittedSpHandle() {
+            return m_lastCommittedSpHandle;
         }
 
         @Override
@@ -171,7 +185,7 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
         }
 
         @Override
-        public HashMap<String, ProcedureRunner> getProcedures() {
+        public ImmutableMap<String, ProcedureRunner> getProcedures() {
             throw new RuntimeException("Not implemented in iv2");
             // return m_loadedProcedures.procs;
         }
@@ -244,7 +258,7 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
 
         @Override
         public boolean updateCatalog(String diffCmds, CatalogContext context, CatalogSpecificPlanner csp) {
-            throw new RuntimeException("Not implemented in iv2");
+            return Site.this.updateCatalog(diffCmds, context, csp, false);
         }
     };
 
@@ -258,7 +272,9 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
             long txnId,
             int partitionId,
             int numPartitions,
-            boolean createForRejoin)
+            boolean createForRejoin,
+            int snapshotPriority,
+            InitiatorMailbox initiatorMailbox)
     {
         m_siteId = siteId;
         m_context = context;
@@ -267,9 +283,13 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
         m_scheduler = scheduler;
         m_backend = backend;
         m_isRejoining = createForRejoin;
-
+        m_snapshotPriority = snapshotPriority;
         // need this later when running in the final thread.
         m_startupConfig = new StartupConfig(serializedCatalog, txnId);
+        m_lastCommittedTxnId = TxnEgo.makeZero(partitionId).getTxnId();
+        m_lastCommittedSpHandle = TxnEgo.makeZero(partitionId).getTxnId();
+        m_currentTxnId = Long.MIN_VALUE;
+        m_initiatorMailbox = initiatorMailbox;
     }
 
     /** Update the loaded procedures. */
@@ -294,15 +314,21 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
             m_hsql = null;
             m_ee = initializeEE(serializedCatalog, txnId);
         }
-        // IZZY- Get me from the deployment file in some sane way somehow some day
-        int snapshotPriority = 6;
+
         m_snapshotter = new SnapshotSiteProcessor(new Runnable() {
             @Override
             public void run() {
                 m_scheduler.offer(new SnapshotTask());
             }
         },
-        snapshotPriority);
+        m_snapshotPriority,
+        new SnapshotSiteProcessor.IdlePredicate() {
+
+            @Override
+            public boolean idle(long now) {
+                return (now - 5) > m_lastTxnTime;
+            }
+        });
     }
 
     /** Create a native VoltDB execution engine */
@@ -395,7 +421,8 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
         SiteTasker task = m_scheduler.poll();
         if (task != null) {
             if (task instanceof TransactionTask) {
-                m_currentTxnId = ((TransactionTask)task).getMpTxnId();
+                m_currentTxnId = ((TransactionTask)task).getTxnId();
+                m_lastTxnTime = EstTime.currentTimeMillis();
             }
             if (m_isRejoining) {
                 task.runForRejoin(getSiteProcedureConnection());
@@ -404,8 +431,6 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
                 task.run(getSiteProcedureConnection());
             }
         }
-
-        m_snapshotter.doSnapshotWork(m_ee, true);
     }
 
     public void startShutdown()
@@ -522,7 +547,7 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
     }
 
     @Override
-    public void truncateUndoLog(boolean rollback, long beginUndoToken, long txnId)
+    public void truncateUndoLog(boolean rollback, long beginUndoToken, long txnId, long spHandle)
     {
         if (rollback) {
             m_ee.undoUndoToken(beginUndoToken);
@@ -534,6 +559,12 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
                 m_ee.releaseUndoToken(latestUndoToken);
             }
             m_lastCommittedTxnId = txnId;
+            if (TxnEgo.getPartitionId(m_lastCommittedSpHandle) != TxnEgo.getPartitionId(spHandle)) {
+                VoltDB.crashLocalVoltDB("Mismatch SpHandle partitiond id " +
+                        TxnEgo.getPartitionId(m_lastCommittedSpHandle) + ", " +
+                        TxnEgo.getPartitionId(spHandle), true, null);
+            }
+            m_lastCommittedSpHandle = spHandle;
         }
     }
 
@@ -625,4 +656,54 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
                 readOnly ? Long.MAX_VALUE : getNextUndoToken());
     }
 
+    @Override
+    public ProcedureRunner getProcedureRunner(String procedureName) {
+        return m_loadedProcedures.getProcByName(procedureName);
+    }
+
+    /**
+     * Update the catalog.  If we're the MPI, don't bother with the EE.
+     */
+    public boolean updateCatalog(String diffCmds, CatalogContext context, CatalogSpecificPlanner csp,
+            boolean isMPI)
+    {
+        m_context = context;
+        m_loadedProcedures.loadProcedures(m_context, m_backend, csp);
+
+        if (!isMPI) {
+            //Necessary to quiesce before updating the catalog
+            //so export data for the old generation is pushed to Java.
+            m_ee.quiesce(m_lastCommittedTxnId);
+            m_ee.updateCatalog(m_context.m_transactionId, diffCmds);
+        }
+
+        return true;
+    }
+
+    @Override
+    public void setPerPartitionTxnIds(long[] perPartitionTxnIds) {
+        boolean foundMultipartTxnId = false;
+        boolean foundSinglepartTxnId = false;
+        for (long txnId : perPartitionTxnIds) {
+            if (TxnEgo.getPartitionId(txnId) == m_partitionId) {
+                if (foundSinglepartTxnId) {
+                    VoltDB.crashLocalVoltDB(
+                            "Found multiple transactions ids during restore for a partition", false, null);
+                }
+                foundSinglepartTxnId = true;
+                m_initiatorMailbox.setMaxLastSeenTxnId(txnId);
+            }
+            if (TxnEgo.getPartitionId(txnId) == MpInitiator.MP_INIT_PID) {
+                if (foundMultipartTxnId) {
+                    VoltDB.crashLocalVoltDB(
+                            "Found multiple transactions ids during restore for a multipart txnid", false, null);
+                }
+                foundMultipartTxnId = true;
+                m_initiatorMailbox.setMaxLastSeenMultipartTxnId(txnId);
+            }
+        }
+        if (!foundMultipartTxnId) {
+            VoltDB.crashLocalVoltDB("Didn't find a multipart txnid on restore", false, null);
+        }
+    }
 }

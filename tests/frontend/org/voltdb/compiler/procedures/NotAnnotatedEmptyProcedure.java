@@ -20,30 +20,13 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
  */
+package org.voltdb.compiler.procedures;
 
-package org.voltdb_testprocs.regressionsuites.failureprocs;
-
-import org.voltdb.ProcInfo;
-import org.voltdb.SQLStmt;
 import org.voltdb.VoltProcedure;
 
-@ProcInfo (
-    singlePartition = false
-)
-public class DeterministicRWProc extends VoltProcedure {
-
-    // Meaningless where clause makes expected output easier to test for.
-    public static final SQLStmt queryUnambiguousRows = new SQLStmt("select * from blah where sval < 'NDC=false' order by ival, sval limit 2");
-    public static final SQLStmt updateUnambiguously = new SQLStmt("update blah set sval = ?");
-
-    public long run() {
-        voltQueueSQL(queryUnambiguousRows);
-        voltExecuteSQL();
-        String updateArg = "safe input as if based on deterministic query";
-        voltQueueSQL(updateUnambiguously, updateArg);
-        voltExecuteSQL();
-        // zero is a successful return
-        return 0;
+public class NotAnnotatedEmptyProcedure extends VoltProcedure {
+    public long run(long isbn, String title, String author)
+    throws VoltAbortException {
+        return 1;
     }
-
 }
