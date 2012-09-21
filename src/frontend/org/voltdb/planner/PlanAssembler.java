@@ -58,6 +58,7 @@ import org.voltdb.plannodes.ProjectionPlanNode;
 import org.voltdb.plannodes.ReceivePlanNode;
 import org.voltdb.plannodes.SchemaColumn;
 import org.voltdb.plannodes.SendPlanNode;
+import org.voltdb.plannodes.UnionPlanNode;
 import org.voltdb.plannodes.UpdatePlanNode;
 import org.voltdb.types.ExpressionType;
 import org.voltdb.types.PlanNodeType;
@@ -182,14 +183,7 @@ public class PlanAssembler {
         return false;
     }
 
-    /**
-     * Clear any old state and get ready to plan a new plan. The next call to
-     * getNextPlan() will return the first candidate plan for these parameters.
-     *
-     */
-    void setupForNewPlans(AbstractParsedStmt parsedStmt)
-    {
-        m_insertPlanWasGenerated = false;
+    public void verifyTablePatition (AbstractParsedStmt parsedStmt) {
         int countOfPartitionedTables = 0;
         Map<String, String> partitionColumnByTable = new HashMap<String, String>();
         // Do we have a need for a distributed scan at all?
@@ -226,6 +220,16 @@ public class PlanAssembler {
                 throw new PlanningErrorException(msg);
             }
         }
+    }
+
+    /**
+     * Clear any old state and get ready to plan a new plan. The next call to
+     * getNextPlan() will return the first candidate plan for these parameters.
+     *
+     */
+    void setupForNewPlans(AbstractParsedStmt parsedStmt)
+    {
+        verifyTablePatition (parsedStmt);
 
         if (parsedStmt instanceof ParsedSelectStmt) {
             if (tableListIncludesExportOnly(parsedStmt.tableList)) {
@@ -289,7 +293,7 @@ public class PlanAssembler {
      * @return A not-previously returned query plan or null if no more
      *         computable plans.
      */
-    CompiledPlan getNextPlan() {
+    CompiledPlan getNextPlan(boolean addSendReceive) {
         // reset the plan column guids and pool
         //PlanColumn.resetAll();
 
@@ -297,7 +301,7 @@ public class PlanAssembler {
         AbstractParsedStmt nextStmt = null;
         if (m_parsedSelect != null) {
             nextStmt = m_parsedSelect;
-            retval.rootPlanGraph = getNextSelectPlan();
+            retval.rootPlanGraph = getNextSelectPlan(addSendReceive);
             retval.readOnly = true;
             if (retval.rootPlanGraph != null)
             {
@@ -347,6 +351,42 @@ public class PlanAssembler {
         return retval;
     }
 
+    /**
+     * This is a UNION specific method. Generate a unique and correct plan
+     * for the current SQL UNION statement given the best plans for each individual SELECT.
+     * This method gets called ones.
+     *
+     * @return A union plan or null.
+     */
+    public CompiledPlan getNextUnionPlan(AbstractParsedStmt nextStmt, ParsedUnionStmt.UnionType unionType, List<CompiledPlan> selectPlans) {
+        CompiledPlan retval = new CompiledPlan();
+
+        AbstractPlanNode root = new UnionPlanNode(unionType);
+        for (CompiledPlan selectPlan : selectPlans) {
+            root.addAndLinkChild(selectPlan.rootPlanGraph);
+        }
+
+        SendPlanNode sendNode = new SendPlanNode();
+
+        // connect the nodes to build the graph
+        sendNode.addAndLinkChild(root);
+        sendNode.generateOutputSchema(m_catalogDb);
+
+        retval.rootPlanGraph = sendNode;
+        retval.readOnly = true;
+
+
+        assert (nextStmt != null);
+        addParameters(retval, nextStmt);
+        retval.fullWhereClause = nextStmt.where;
+        retval.fullWinnerPlan = retval.rootPlanGraph;
+        // Do a final generateOutputSchema pass.
+        retval.rootPlanGraph.generateOutputSchema(m_catalogDb);
+        retval.setPartitioningKey(m_partitioning.effectivePartitioningValue());
+
+        return retval;
+    }
+
     private void addColumns(CompiledPlan plan, ParsedSelectStmt stmt) {
         NodeSchema output_schema = plan.rootPlanGraph.getOutputSchema();
         // Sanity-check the output NodeSchema columns against the display columns
@@ -383,7 +423,7 @@ public class PlanAssembler {
         }
     }
 
-    private AbstractPlanNode getNextSelectPlan() {
+    private AbstractPlanNode getNextSelectPlan(boolean addSendReceive) {
         assert (subAssembler != null);
 
         AbstractPlanNode subSelectRoot = subAssembler.nextPlan();
@@ -412,14 +452,17 @@ public class PlanAssembler {
             root = handleLimitOperator(root);
         }
 
+        if (addSendReceive) {
+            SendPlanNode sendNode = new SendPlanNode();
 
-        SendPlanNode sendNode = new SendPlanNode();
+            // connect the nodes to build the graph
+            sendNode.addAndLinkChild(root);
+            sendNode.generateOutputSchema(m_catalogDb);
 
-        // connect the nodes to build the graph
-        sendNode.addAndLinkChild(root);
-        sendNode.generateOutputSchema(m_catalogDb);
-
-        return sendNode;
+            return sendNode;
+        } else {
+            return root;
+        }
     }
 
     private AbstractPlanNode getNextDeletePlan() {
