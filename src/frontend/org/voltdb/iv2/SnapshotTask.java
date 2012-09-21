@@ -17,14 +17,10 @@
 
 package org.voltdb.iv2;
 
-import org.voltcore.logging.VoltLogger;
-
 import org.voltdb.SiteProcedureConnection;
 
 public class SnapshotTask extends SiteTasker
 {
-    private static final VoltLogger hostLog = new VoltLogger("HOST");
-
     public SnapshotTask()
     {
     }
@@ -32,7 +28,7 @@ public class SnapshotTask extends SiteTasker
     @Override
     public void run(SiteProcedureConnection siteConnection)
     {
-        siteConnection.doSnapshotWork(false);
+        siteConnection.doSnapshotWork(true);
     }
 
     @Override
@@ -40,11 +36,4 @@ public class SnapshotTask extends SiteTasker
     {
         throw new RuntimeException("Snapshot task attempted snapshot on partial rejoin state.");
     }
-
-    @Override
-    public int priority()
-    {
-        return 0;
-    }
-
 }

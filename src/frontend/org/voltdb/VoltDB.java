@@ -539,7 +539,7 @@ public class VoltDB {
         wasCrashCalled = true;
         crashMessage = errMsg;
         if (ignoreCrash) {
-            return;
+            throw new AssertionError("Faux crash of VoltDB successful.");
         }
 
         List<String> throwerStacktrace = null;
@@ -622,6 +622,7 @@ public class VoltDB {
 
         if (log != null)
         {
+            log.fatal(errMsg);
             if (thrown != null) {
                 if (stackTrace) {
                     for (String throwerStackElem : throwerStacktrace) {
@@ -631,10 +632,26 @@ public class VoltDB {
                     log.fatal(thrown.toString());
                 }
             } else {
-                log.fatal(errMsg);
                 if (stackTrace) {
                     for (String currentStackElem : currentStacktrace) {
                         log.fatal(currentStackElem);
+                    }
+                }
+            }
+        } else {
+            System.err.println(errMsg);
+            if (thrown != null) {
+                if (stackTrace) {
+                    for (String throwerStackElem : throwerStacktrace) {
+                        System.err.println(throwerStackElem);
+                    }
+                } else {
+                    System.err.println(thrown.toString());
+                }
+            } else {
+                if (stackTrace) {
+                    for (String currentStackElem : currentStacktrace) {
+                        System.err.println(currentStackElem);
                     }
                 }
             }
@@ -663,7 +680,7 @@ public class VoltDB {
         wasCrashCalled = true;
         crashMessage = errMsg;
         if (ignoreCrash) {
-            return;
+            throw new AssertionError("Faux crash of VoltDB successful.");
         }
         try {
             instance().getHostMessenger().sendPoisonPill(errMsg);

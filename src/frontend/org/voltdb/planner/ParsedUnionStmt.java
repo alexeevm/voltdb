@@ -18,8 +18,11 @@
 package org.voltdb.planner;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 
 import org.hsqldb_voltpatches.VoltXMLElement;
@@ -37,7 +40,22 @@ public class ParsedUnionStmt extends AbstractParsedStmt {
         INTERSECT_ALL,
         EXCEPT_ALL,
         EXCEPT,
-        UNION_TERM
+        UNION_TERM,
+        ;
+
+        private static final Map<String, UnionType> name_lookup = new HashMap<String, UnionType>();
+
+        static {
+            for (UnionType vt : EnumSet.allOf(UnionType.class)) {
+                String name = vt.name().toLowerCase();
+                name_lookup.put(name.intern(), vt);
+            }
+        }
+
+        public static UnionType get(String name)
+        {
+            return name_lookup.get(name.toLowerCase().intern());
+        }
     };
 
     public ArrayList<AbstractParsedStmt> m_children = new ArrayList<AbstractParsedStmt>();

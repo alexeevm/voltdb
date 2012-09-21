@@ -24,17 +24,13 @@
 package org.voltdb;
 
 import java.net.InetSocketAddress;
-
 import java.util.Arrays;
 import java.util.Collection;
 
-import org.junit.runner.RunWith;
-
-import org.junit.runners.Parameterized;
-
-import org.junit.runners.Parameterized.Parameters;
-
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 import org.voltdb.VoltDB.Configuration;
 import org.voltdb.VoltDB.START_ACTION;
 import org.voltdb.client.Client;
@@ -61,7 +57,7 @@ public class TestRejoinEndToEnd extends RejoinTestBase {
     protected final boolean m_useIv2;
     public TestRejoinEndToEnd(boolean useIv2)
     {
-        m_useIv2 = useIv2;
+        m_useIv2 = useIv2 || VoltDB.checkTestEnvForIv2();
     }
 
     final int FAIL_NO_OPEN_SOCKET = 0;
