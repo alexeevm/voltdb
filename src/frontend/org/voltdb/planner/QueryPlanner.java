@@ -304,6 +304,7 @@ public class QueryPlanner {
         // get ready to find the plan with minimal cost
         CompiledPlan bestPlan = null;
 
+        NextPlanParams planParams = new NextPlanParams();
         if (parsedStmt instanceof ParsedUnionStmt) {
 
             m_assembler.verifyTablePatition(parsedStmt);
@@ -311,31 +312,28 @@ public class QueryPlanner {
             ParsedUnionStmt parsedUnionStmt = (ParsedUnionStmt) parsedStmt;
             ArrayList<CompiledPlan> childrenPlans = new ArrayList<CompiledPlan>();
 
-            NextPlanParams planParams = new NextPlanParams();
+            //
+            boolean orderIsDeterministic = true;
+            boolean contentIsDeterministic = true;
+
             planParams.m_isFinal = false;
             for (AbstractParsedStmt parsedSelectStmt : parsedUnionStmt.m_children) {
-                CompiledPlan bestSelectPlan = getBestCostPlan(parsedSelectStmt, costModel,
-                        sql, joinOrder, stmtName, procName, paramHints, planParams);
+                CompiledPlan bestSelectPlan = getBestCostPlan(parsedSelectStmt, planParams);
                 // make sure we got a winner
                 if (bestSelectPlan == null) {
                     m_recentErrorMsg = "Unable to plan for statement. Error unknown.";
                     return null;
                 }
                 childrenPlans.add(bestSelectPlan);
+                orderIsDeterministic = orderIsDeterministic && bestSelectPlan.isOrderDeterministic();
+                contentIsDeterministic = contentIsDeterministic && bestSelectPlan.isContentDeterministic();
             }
 
             // For now the best plan for union is the sum of best plans for the selects
             bestPlan = m_assembler.getNextUnionPlan(parsedStmt, parsedUnionStmt.m_unionType, childrenPlans);
 
-            bestPlan.sql = sql;
+            bestPlan.sql = m_sql;
 
-            //
-            boolean orderIsDeterministic = true;
-            boolean contentIsDeterministic = true;
-            for (CompiledPlan childPlan: childrenPlans) {
-                orderIsDeterministic = orderIsDeterministic && childPlan.isOrderDeterministic();
-                contentIsDeterministic = contentIsDeterministic && childPlan.isContentDeterministic();
-            }
             bestPlan.statementGuaranteesDeterminism(contentIsDeterministic, orderIsDeterministic);
 
             // compute the cost - total of all children
@@ -349,25 +347,23 @@ public class QueryPlanner {
 
             if (!m_quietPlanner) {
                 if (m_fullDebug) {
-                    outputPlanFullDebug(bestPlan, bestPlan.rootPlanGraph, stmtName, procName, filename);
+                    outputPlanFullDebug(bestPlan, bestPlan.rootPlanGraph, filename);
                 }
 
                 // get the explained plan for the node
                 bestPlan.explainedPlan = bestPlan.rootPlanGraph.toExplainPlanString();
-                outputExplainedPlan(stmtName, procName, bestPlan, filename);
+                outputExplainedPlan(bestPlan, filename);
             }
 
 
             // @TODO For now stat is empty debug output and finalize when to call?
             PlanStatistics stats = new PlanStatistics();
             if (bestPlan != null && !m_quietPlanner) {
-                finalizeOutput(stmtName, procName, filename, stats);
+                finalizeOutput(filename, stats);
             }
         } else {
-            boolean needSendReceive = true;
-            NextPlanParams planParams = new NextPlanParams();
-            bestPlan = getBestCostPlan(parsedStmt, costModel,
-                    sql, joinOrder, stmtName,procName, paramHints, planParams);
+            planParams.m_isFinal = true;
+            bestPlan = getBestCostPlan(parsedStmt, planParams);
         }
 
         // make sure we got a winner
@@ -380,105 +376,92 @@ public class QueryPlanner {
         // this makes the ids deterministic
         bestPlan.resetPlanNodeIds();
 
-        if (!m_quietPlanner)
-        {
-            finalizeOutput(bestFilename, stats);
-        }
-
         // split up the plan everywhere we see send/recieve into multiple plan fragments
         Fragmentizer.fragmentize(bestPlan, m_db);
         return bestPlan;
     }
 
-    private CompiledPlan getBestCostPlan(
-            AbstractParsedStmt parsedStmt,
-            AbstractCostModel costModel,
-            String sql,
-            String joinOrder,
-            String stmtName,
-            String procName,
-            ScalarValueHints[] paramHints,
-            NextPlanParams planParams) {
+    private CompiledPlan getBestCostPlan(AbstractParsedStmt parsedStmt, NextPlanParams planParams) {
 
-    // set up the plan assembler for this statement
-    m_assembler.setupForNewPlans(parsedStmt);
+        // set up the plan assembler for this statement
+        m_assembler.setupForNewPlans(parsedStmt);
 
-    // get ready to find the plan with minimal cost
-    CompiledPlan rawplan = null;
-    CompiledPlan bestPlan = null;
-    String bestFilename = null;
-    double minCost = Double.MAX_VALUE;
+        // get ready to find the plan with minimal cost
+        CompiledPlan rawplan = null;
+        CompiledPlan bestPlan = null;
+        String bestFilename = null;
+        double minCost = Double.MAX_VALUE;
 
-    PlanStatistics stats = null;
+        PlanStatistics stats = null;
 
-    // loop over all possible plans
-    while (true) {
+        // loop over all possible plans
+        while (true) {
 
-        try {
-            rawplan = m_assembler.getNextPlan(planParams.m_isFinal);
-        }
-        // on exception, set the error message and bail...
-        catch (PlanningErrorException e) {
-            m_recentErrorMsg = e.getMessage();
-            return null;
-        }
-
-        // stop this while loop when no more plans are generated
-        if (rawplan == null)
-            break;
-
-        // run the set of microptimizations, which may return many plans (or not)
-        List<CompiledPlan> optimizedPlans = MicroOptimizationRunner.applyAll(rawplan);
-
-        // iterate through the subset of plans
-        for (CompiledPlan plan : optimizedPlans) {
-
-            // add in the sql to the plan
-            plan.sql = sql;
-
-            // this plan is final, resolve all the column index references
-            plan.rootPlanGraph.resolveColumnIndexes();
-
-            // compute resource usage using the single stats collector
-            stats = new PlanStatistics();
-            AbstractPlanNode planGraph = plan.rootPlanGraph;
-
-            // compute statistics about a plan
-            boolean result = planGraph.computeEstimatesRecursively(stats, m_cluster, m_db, m_estimates, paramHints);
-            assert(result);
-
-            // compute the cost based on the resources using the current cost model
-            plan.cost = costModel.getPlanCost(stats);
-
-            // filename for debug output
-            String filename = String.valueOf(planParams.m_counter++);
-
-            // find the minimum cost plan
-            if (plan.cost < minCost) {
-                minCost = plan.cost;
-                // free the PlanColumns held by the previous best plan
-                bestPlan = plan;
-                bestFilename = filename;
+            try {
+                rawplan = m_assembler.getNextPlan(planParams.m_isFinal);
+            }
+            // on exception, set the error message and bail...
+            catch (PlanningErrorException e) {
+                m_recentErrorMsg = e.getMessage();
+                return null;
             }
 
-            if (!m_quietPlanner) {
-                if (m_fullDebug) {
-                    outputPlanFullDebug(plan, planGraph, stmtName, procName, filename);
+            // stop this while loop when no more plans are generated
+            if (rawplan == null)
+                break;
+
+            // run the set of microptimizations, which may return many plans (or not)
+            List<CompiledPlan> optimizedPlans = MicroOptimizationRunner.applyAll(rawplan);
+
+            // iterate through the subset of plans
+            for (CompiledPlan plan : optimizedPlans) {
+
+                // add in the sql to the plan
+                plan.sql = m_sql;
+
+                // this plan is final, resolve all the column index references
+                plan.rootPlanGraph.resolveColumnIndexes();
+
+                // compute resource usage using the single stats collector
+                stats = new PlanStatistics();
+                AbstractPlanNode planGraph = plan.rootPlanGraph;
+
+                // compute statistics about a plan
+                boolean result = planGraph.computeEstimatesRecursively(stats, m_cluster, m_db, m_estimates, m_paramHints);
+                assert(result);
+
+                // compute the cost based on the resources using the current cost model
+                plan.cost = m_costModel.getPlanCost(stats);
+
+                // filename for debug output
+                String filename = String.valueOf(planParams.m_counter++);
+
+                // find the minimum cost plan
+                if (plan.cost < minCost) {
+                    minCost = plan.cost;
+                    // free the PlanColumns held by the previous best plan
+                    bestPlan = plan;
+                    bestFilename = filename;
                 }
 
-                // get the explained plan for the node
-                plan.explainedPlan = planGraph.toExplainPlanString();
-                outputExplainedPlan(stmtName, procName, plan, filename);
+                if (!m_quietPlanner) {
+                    if (m_fullDebug) {
+                        outputPlanFullDebug(plan, planGraph, filename);
+                    }
+
+                    // get the explained plan for the node
+                    plan.explainedPlan = planGraph.toExplainPlanString();
+                    outputExplainedPlan(plan, filename);
+                }
             }
         }
-    }
 
-    if (planParams.m_isFinal && bestPlan != null && !m_quietPlanner) {
-        finalizeOutput(stmtName, procName, bestFilename, stats);
-    }
+        if (planParams.m_isFinal && bestPlan != null && !m_quietPlanner) {
+            finalizeOutput(bestFilename, stats);
+        }
 
-    return bestPlan;
-}
+        return bestPlan;
+    }
 
     /**
      * @param stmtName

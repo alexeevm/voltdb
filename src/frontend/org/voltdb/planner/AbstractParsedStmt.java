@@ -135,7 +135,7 @@ public abstract class AbstractParsedStmt {
         }
 
         // parse tables and parameters
-        retval.parseTablesAndParams(xmlSQL, db);
+        retval.parseTablesAndParams(stmtTypeElement, db);
 
         // parse specifics
         retval.parse(stmtTypeElement, db);
@@ -161,14 +161,13 @@ public abstract class AbstractParsedStmt {
     void parseTablesAndParams(VoltXMLElement root, Database db) {
         for (VoltXMLElement node : root.children) {
             if (node.name.equalsIgnoreCase("parameters")) {
-                this.parseParameters(node, db);
+                parseParameters(node);
             }
             if (node.name.equalsIgnoreCase("tablescans")) {
-                String str = node.toString();
-                this.parseTables(node, db);
+                parseTables(node, db);
             }
             if (node.name.equalsIgnoreCase("scan_columns")) {
-                this.parseScanColumns(node, db);
+                parseScanColumns(node, db);
             }
         }
     }
@@ -179,15 +178,15 @@ public abstract class AbstractParsedStmt {
      * @param db
      * @param joinOrder
      */
-    void postParse(String sql, Database db, String joinOrder) {
+    void postParse(String a_sql, Database db, String a_joinOrder) {
         // split up the where expression into categories
-        this.analyzeWhereExpression(db);
+        analyzeWhereExpression(db);
         // these just shouldn't happen right?
-        assert(this.multiTableSelectionList.size() == 0);
-        assert(this.noTableSelectionList.size() == 0);
+        assert(multiTableSelectionList.size() == 0);
+        assert(noTableSelectionList.size() == 0);
 
-        this.sql = sql;
-        this.joinOrder = joinOrder;
+        sql = a_sql;
+        joinOrder = a_joinOrder;
     }
 
     /**

@@ -99,7 +99,7 @@ std::cout << "Comp " << it1->debug() << " and " << it2->debug() << " res=" << co
             }
 std::cout << "Equal\n";
             return false;
-        } 
+        }
     };
 }
 
@@ -131,9 +131,9 @@ std::cout << "expr=" << nextExpr->debug() << '\n';
             tuples.push_back(nextExpr->eval(&tuple, NULL));
             nextExpr = nextExpr->getRight();
         }
-        
+
         if (found_values.find(tuples) == found_values.end()) {
-std::cout<< tuple.debug("A") << "new\n"; 
+std::cout<< tuple.debug("A") << "new\n";
             found_values.insert(tuples);
             if (!output_table->insertTuple(tuple)) {
                 VOLT_ERROR("Failed to insert tuple from input table '%s' into"
@@ -144,8 +144,8 @@ std::cout<< tuple.debug("A") << "new\n";
             }
         }
     else
-std::cout<< tuple.debug("A") << "old\n"; 
-    
+std::cout<< tuple.debug("A") << "old\n";
+
     }
 
     return true;
