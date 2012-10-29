@@ -66,7 +66,6 @@ namespace voltdb
     class SeqScanExecutor : public AbstractExecutor {
     public:
         SeqScanExecutor(VoltDBEngine *engine, AbstractPlanNode* abstract_node);
-        bool support_pull() const;
 
     private:
         bool p_init(AbstractPlanNode* abstract_node,
@@ -74,9 +73,10 @@ namespace voltdb
         bool p_execute(const NValueArray& params);
         bool needsOutputTableClear();
 
-        TableTuple p_next_pull();
+        TableIterator&  p_next_pull(size_t batchSize);
         void p_pre_execute_pull(const NValueArray& params);
         void p_reset_state_pull();
+        void p_clear_output_table_pull();
 
         boost::scoped_ptr<detail::SeqScanExecutorState> m_state;
     };

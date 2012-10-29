@@ -68,7 +68,9 @@ namespace detail {
         SeqScanExecutorState(AbstractExpression* predicate, Table* targetTable,
             Table* outputTable) :
             m_targetTable(targetTable),
+            m_outputTable(outputTable),
             m_iterator(targetTable->iterator()),
+            m_output_iterator(outputTable->iterator()),
             m_predicate(predicate),
             m_tupleCtr(0),
             m_targetTableTupleCount((int)targetTable->activeTupleCount()),
@@ -80,7 +82,9 @@ namespace detail {
         }
 
         Table* m_targetTable;
+        Table* m_outputTable;
         TableIterator m_iterator;
+        TableIterator& m_output_iterator;
         AbstractExpression* m_predicate;
         int m_tupleCtr;
         int m_targetTableTupleCount;
@@ -296,26 +300,48 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
 
 
 //@TODO pullexec prototype
-TableTuple SeqScanExecutor::p_next_pull() {
-
-    TableTuple tuple(m_state->m_targetTableSchema);
+TableIterator& SeqScanExecutor::p_next_pull(size_t batchSize) {
+    // Get the allowed size for the next batch
+    size_t thisBatchSize = p_batch_size_pull();
+    
+    // If there is no predicate then we have already set 
+    // the node's OutputTable to just point at the TargetTable. 
+    // Therefore, simply return the iterator to the persistent table
     //
-    // if there is a predicate find the next tuple which satisfies it
-    //
-    while (m_state->m_iterator.next(tuple)) {
-        VOLT_TRACE("INPUT TUPLE: %s, %d/%d\n",
-                   tuple.debug(m_state->m_targetTableName, m_state->m_tupleCtr,
-                   m_state->m_targetTableTupleCount));
-        if (m_state->m_predicate == NULL ||
-            m_state->m_predicate->eval(&tuple, NULL).isTrue()) {
-            ++m_state->m_tupleCtr;
-//{ printf("\nDEBUG: %s\n", "SCANNING NO PROBLEM, REALLY"); }
-            return tuple;
+    if (m_state->m_predicate == NULL) {
+        return m_state->m_iterator;
+    } else {
+        // Check if there is something left in the output table.
+        // If not, then process the next batch. Otherwise, simply return the temp table iterator
+        if (!m_state->m_output_iterator.hasNext()) {
+            // Clear output table to keep the next batch
+            // @TODO Free allocated String ?
+            m_state->m_outputTable->deleteAllTuples(false);
+            
+            // Adjust the requested batch size not to exceed the allowed one
+            // @TODO Do really need it?
+            if (batchSize > thisBatchSize) {
+                batchSize = thisBatchSize;
+            }
+                
+            // Find the next tuple which satisfies it
+            TableTuple tuple(m_state->m_targetTableSchema);
+            for (size_t count = 0; m_state->m_iterator.next(tuple) && count < batchSize; ++count) {
+                VOLT_TRACE("INPUT TUPLE: %s, %d/%d\n",
+                           tuple.debug(m_state->m_targetTableName, m_state->m_tupleCtr,
+                           m_state->m_targetTableTupleCount));
+                if (m_state->m_predicate->eval(&tuple, NULL).isTrue()) {
+                    ++m_state->m_tupleCtr;
+                    //
+                    // Insert the tuple into our output table
+                    p_insert_output_table_pull(tuple);
+                }
+            }
+            // reset the output iterator
+            m_state->m_outputTable->iterator();
         }
+        return m_state->m_output_iterator;
     }
-//{ printf("\nDEBUG: %s\n", "SCANNED NO PROBLEM, REALLY"); }
-    TableTuple nullTuple(m_state->m_targetTableSchema);
-    return nullTuple;
 }
 
 void SeqScanExecutor::p_pre_execute_pull(const NValueArray &params) {
@@ -349,10 +375,21 @@ void SeqScanExecutor::p_pre_execute_pull(const NValueArray &params) {
     m_state.reset(new detail::SeqScanExecutorState(predicate, target_table, output_table));
 }
 
-bool SeqScanExecutor::support_pull() const {
-    return true;
+void SeqScanExecutor::p_reset_state_pull() {
+    // Reset the target table iterator
+    m_state->m_targetTable->iterator();
+    // Clear the output table
+    p_clear_output_table_pull();
 }
 
-void SeqScanExecutor::p_reset_state_pull() {
-    m_state->m_iterator = m_state->m_targetTable->iterator();
+void SeqScanExecutor::p_clear_output_table_pull()
+{
+    if (m_state->m_predicate != NULL) {
+        // Clear the output table
+        // @TODO Free allocated String ?
+        m_state->m_outputTable->deleteAllTuples(false);
+        // And Reset the output table iterator
+        m_state->m_outputTable->iterator();
+    }
 }
+

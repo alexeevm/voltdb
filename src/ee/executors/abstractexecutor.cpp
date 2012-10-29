@@ -145,7 +145,7 @@ bool AbstractExecutor::init(VoltDBEngine* engine,
 }
 
 AbstractExecutor::AbstractExecutor(VoltDBEngine* engine, AbstractPlanNode* abstractNode):
-    m_abstractNode(abstractNode), m_tmpOutputTable(NULL), m_absState()
+    m_abstractNode(abstractNode), m_tmpOutputTable(NULL)
 {}
 
 AbstractExecutor::~AbstractExecutor() {}
@@ -175,10 +175,38 @@ bool AbstractExecutor::execute_pull(const NValueArray& params)
     return true;
 }
 
+void AbstractExecutor::p_execute_pull()
+{
+    // Get the batch size
+    size_t batchSize = this->p_batch_size_pull();
+    // iteration stops when next_pull returns an empty iterator
+    while (true)
+    {
+        TableIterator& it = next_pull(batchSize);
+        if (!it.hasNext()) {
+            break;
+        } else {
+            TableTuple tuple(m_tmpOutputTable->schema());
+            // iterate over the tuples
+            size_t count = 0;
+            // Iterate over the batch. The number of tuple ready for 
+            // is not guaranteed to match the requested figure.
+            do {
+                // Extract next tuple from this executor input table
+                it.next(tuple);
+                // Insert processed tuple into the output table
+                this->p_insert_output_table_pull(tuple);
+            } while(it.hasNext()|| ++count < batchSize);
+        }
+    }
+}
+
+/*
 static void add_to_list(AbstractExecutor* exec, std::vector<AbstractExecutor*>& list)
 {
     list.push_back(exec);
 }
+*/
 
 //@TODO To accomodate executors that have not been updated to implement the pull protocol,
 // this implementation provides an adaptor to the older push protocol.
@@ -191,6 +219,8 @@ static void add_to_list(AbstractExecutor* exec, std::vector<AbstractExecutor*>& 
 // Implements p_next_pull to retrieve each row from its output table (previously populated by its execute method).
 void AbstractExecutor::p_pre_execute_pull(const NValueArray& params)
 {
+    assert(false);
+/*
     // Build the depth-first children list.
     std::vector<AbstractExecutor*> execs;
     boost::function<void(AbstractExecutor*)> faddtolist =
@@ -217,18 +247,5 @@ void AbstractExecutor::p_pre_execute_pull(const NValueArray& params)
                                           "The Executor's execution failed");
         }
     }
-
-    // Now the executor's output table is populated.
-    // Initialize the iterator to be ready for p_next_pull.
-    Table* output_table = m_abstractNode->getOutputTable();
-    assert(output_table);
-    m_absState.reset(new detail::AbstractExecutorState(output_table));
-}
-
-TableTuple AbstractExecutor::p_next_pull()
-{
-    if (m_absState->m_iterator->next(m_absState->m_nextTuple)) {
-        return m_absState->m_nextTuple;
-    }
-    return m_absState->m_nullTuple;
+*/
 }

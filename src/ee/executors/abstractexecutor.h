@@ -60,22 +60,6 @@ namespace voltdb {
 class TempTableLimits;
 class VoltDBEngine;
 
-namespace detail {
-// must be in the header file to be visible from other executors
-struct AbstractExecutorState
-{
-    AbstractExecutorState(Table* table) :
-        m_iterator(table->makeIterator()),
-        m_nextTuple(table->schema()),
-        m_nullTuple(table->schema())
-    {}
-    boost::scoped_ptr<TableIterator> m_iterator;
-    TableTuple m_nextTuple;
-    TableTuple m_nullTuple;
-};
-
-} // namespace detail
-
 /**
  * AbstractExecutor provides the API for initializing and invoking executors.
  */
@@ -96,26 +80,30 @@ class AbstractExecutor {
     virtual bool support_pull() const;
 
     /** Gets next available tuple(s) from input table as needed
-     * and applies executor specific logic to produce its next tuple. */
-    TableTuple next_pull();
+     * and applies executor specific logic to produce its next tuple(s). */
+    TableIterator& next_pull(size_t batchSize);
 
     /** Generic behavior wrapping the custom p_pre_execute_pull. */
     // @TODO: Does the need to prep m_tmpOutputTable really cut across executor classes?
     // Or should we consider moving this into custom p_pre_execute_pull implementations only as it may apply?
     void pre_execute_pull(const NValueArray& params);
 
-    /** Cleans up after the p_next_pull iteration. */
+    /** Cleans up after the next_pull iteration. */
     void post_execute_pull();
 
     /** Reset executor's pull state */
     void reset_state_pull();
 
-    // Clean up the output table of the executor tree as needed
-    // Generic behavior wrapping the custom p_pre_execute_pull.
-    void clearOutputTables();
-
-    //@TODO need something better than this.
-    // Only required by aggregate executor in case of INSERT
+    /**
+     * Clean up the output table of the executor tree as needed
+     * Generic behavior wrapping the custom p_pre_execute_pull.
+     */
+    void clear_output_tables_pull();
+    
+    /**
+     * @TODO need something better than this.
+     * Only required by aggregate executor in case of INSERT
+     */
     virtual bool parent_send_need_save_tuple_pull() const;
 
     /**
@@ -131,19 +119,25 @@ class AbstractExecutor {
      */
     inline AbstractPlanNode* getPlanNode() { return m_abstractNode; }
 
-    // Generic method to depth first iterate over the children and call the functor on each level
-    // The functor signature is void f(AbstractExecutor*)
-    // The second parameter controls whether the iteration should stop
-    // if child doesn't support the pull mode yet or keep going. For example, if we are simply building
-    // the list of all children for a given node, this parameter should be set to false.
-    // It will become obsolete after all executors will be converted to the pull mode.
+    /**
+     * Helps clean up output tables of an executor and its dependencies.
+     */
+    void clear_output_table_pull();
+    
+    /**
+     * Generic method to depth first iterate over the children and call the functor on each level
+     * The functor signature is void f(AbstractExecutor*)
+     * The second parameter controls whether the iteration should stop
+     * if child doesn't support the pull mode yet or keep going. For example, if we are simply building
+     * the list of all children for a given node, this parameter should be set to false.
+     * It will become obsolete after all executors will be converted to the pull mode.
+     */
     template <typename Functor>
     typename Functor::result_type  depth_first_iterate_pull(Functor& f, bool stopOnPush);
 
   protected:
     AbstractExecutor(VoltDBEngine* engine, AbstractPlanNode* abstractNode);
 
-  private:
     /** Concrete executor classes implement initialization in p_init() */
     virtual bool p_init(AbstractPlanNode*,
                         TempTableLimits* limits) = 0;
@@ -160,14 +154,16 @@ class AbstractExecutor {
      */
     virtual bool needsOutputTableClear() { return true; };
 
-    // @TODO: Eventually, when every executor class has its own p_next_pull implementation,
-    // p_pre_execute_pull will become abstract (pure virtual).
-    // Each executor will be required to implement this function to do its own parameter processing.
-    // For now, to accomodate executors that still use the push-based protocol that
-    // processes parameters in p_execute, AbstractExecutor provides an implementation that
-    // bridges the two protocols -- calling p_execute (and all its prerequisites) which leaves
-    // results in an output table for the defaulted implementation of p_next_pull to find.
-    /** Last minute init before the p_next_pull iteration */
+    /**
+     @TODO: Eventually, when every executor class has its own p_next_pull implementation,
+     * p_pre_execute_pull will become abstract (pure virtual).
+     * Each executor will be required to implement this function to do its own parameter processing.
+     * For now, to accomodate executors that still use the push-based protocol that
+     * processes parameters in p_execute, AbstractExecutor provides an implementation that
+     * bridges the two protocols -- calling p_execute (and all its prerequisites) which leaves
+     * results in an output table for the defaulted implementation of p_next_pull to find.
+     * Last minute init before the p_next_pull iteration 
+     */
     virtual void p_pre_execute_pull(const NValueArray& params);
 
     /** Executor specific logic */
@@ -176,25 +172,29 @@ class AbstractExecutor {
     /** Cleans up after the p_next_pull iteration. */
     virtual void p_post_execute_pull();
 
-    // Saves processed tuple
+    /** Insert the processed tuple into the output table */
     virtual void p_insert_output_table_pull(TableTuple& tuple);
 
     /** Reset executor's pull state */
     virtual void p_reset_state_pull();
 
-    // @TODO: Eventually, every executor class will have its own p_next_pull implementation
-    // that operates within the pull protocol as best it can.
-    // Then this function will be made abstract (pure virtual).
-    // For now, AbstractExecutor provides this sub-optimal implementation that
-    // relies on the executor class implementation of the older push protocol.
-    // In particular, it pulls tuples from the output table that was populated by p_execute.
-    /** Gets next available tuple(s) from input table as needed
+    /**
+     * @TODO: Eventually, every executor class will have its own p_next_pull implementation
+     * that operates within the pull protocol as best it can.
+     * Then this function will be made abstract (pure virtual).
+     * For now, AbstractExecutor provides this sub-optimal implementation that
+     * relies on the executor class implementation of the older push protocol.
+     * In particular, it pulls tuples from the output table that was populated by p_execute.
+     * Gets next available tuple(s) from input table as needed
      * and applies executor specific logic to produce its next tuple. */
-    virtual TableTuple p_next_pull();
+    virtual TableIterator&  p_next_pull(size_t batchSize) = 0;
+    
+    /** Helps clean up output tables of an executor and its dependencies. */
+    virtual void p_clear_output_table_pull() = 0;
 
-    // Helps clean up output tables of an executor and its dependencies.
-    void clearOutputTable_pull();
-
+    /** Returns the suggested size for the next_pull call */
+    virtual size_t p_batch_size_pull () const;
+    
   private:
     // execution engine owns the plannode allocation.
     AbstractPlanNode* m_abstractNode;
@@ -203,10 +203,6 @@ class AbstractExecutor {
     // cache to avoid runtime virtual function call
     bool needs_outputtable_clear_cached;
 
-    // @TODO: Eventually, when the p_execute push protocol is phased out
-    // and each executor implements p_pre_execute_pull and p_next_pull,
-    // this generic mechanism for adapting push protocol executors will not be needed.
-    boost::scoped_ptr<detail::AbstractExecutorState> m_absState;
 };
 
 inline bool AbstractExecutor::execute(const NValueArray& params)
@@ -225,23 +221,9 @@ inline bool AbstractExecutor::execute(const NValueArray& params)
     return p_execute(params);
 }
 
-inline void AbstractExecutor::p_execute_pull()
+inline TableIterator& AbstractExecutor::next_pull(size_t batchSize)
 {
-    // run the executor
-    while (true)
-    {
-        // iteration stops when empty tuple is returned
-        TableTuple tuple = p_next_pull();
-        if (tuple.isNullTuple())
-            break;
-        // Insert processed tuple into the output table
-        p_insert_output_table_pull(tuple);
-    }
-}
-
-inline TableTuple AbstractExecutor::next_pull()
-{
-    return this->p_next_pull();
+    return this->p_next_pull(batchSize);
 }
 
 inline void AbstractExecutor::pre_execute_pull(const NValueArray& params) {
@@ -293,7 +275,7 @@ inline void AbstractExecutor::p_insert_output_table_pull(TableTuple& tuple) {
     assert(m_tmpOutputTable);
     if (!m_tmpOutputTable->insertTuple(tuple)) {
         char message[128];
-        snprintf(message, 128, "Failed to insert into table '%s'",
+        snprintf(message, 128, "Failed to insert into output table '%s'",
                 m_tmpOutputTable->name().c_str());
         VOLT_ERROR("%s", message);
         throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
@@ -305,25 +287,23 @@ inline void AbstractExecutor::p_post_execute_pull() {
 }
 
 
-inline void AbstractExecutor::clearOutputTable_pull()
+inline void AbstractExecutor::clear_output_table_pull()
 {
-    if (needsOutputTableClear())
-    {
-        assert(m_tmpOutputTable);
-        m_tmpOutputTable->deleteAllTuples(false);
+    if (needsOutputTableClear()) {
+        this->p_clear_output_table_pull();
     }
 }
 
 inline bool AbstractExecutor::support_pull() const {
-    return false;
+    return true;
 }
 
 inline void AbstractExecutor::p_reset_state_pull() {
 }
 
-inline void AbstractExecutor::clearOutputTables()
+inline void AbstractExecutor::clear_output_tables_pull()
 {
-    boost::function<void(AbstractExecutor*)> fcleanup = &AbstractExecutor::clearOutputTable_pull;
+    boost::function<void(AbstractExecutor*)> fcleanup = &AbstractExecutor::clear_output_table_pull;
     depth_first_iterate_pull(fcleanup, false);
 }
 
@@ -331,6 +311,12 @@ inline bool AbstractExecutor::parent_send_need_save_tuple_pull() const
 {
     return true;
 }
+
+inline size_t AbstractExecutor::p_batch_size_pull() const {
+    //@TODO
+    return 10;
+}
+
 
 }
 
