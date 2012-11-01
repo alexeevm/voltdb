@@ -77,13 +77,8 @@ protected:
 
     ValueType distinct_column_type;
 
-//@TODO pullexec prototype
-public:
-    TableTuple p_next_pull();
-    bool support_pull() const;
-
-protected:
-
+    //@TODO pullexec prototype
+    TableIterator& p_next_pull(size_t& batchSize);
     void p_pre_execute_pull(const NValueArray& params);
 
 private:

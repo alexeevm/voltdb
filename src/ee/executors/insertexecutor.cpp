@@ -71,7 +71,6 @@ namespace detail {
             m_childExecutor(childExec),
             m_outputTable(outputTable),
             m_inputTableName(inputTable->name().c_str()),
-            m_outputTableName(outputTable->name().c_str()),
             m_targetTableName(targetTable->name().c_str()),
             m_modifiedTuples(0),
             m_done(false)
@@ -80,9 +79,8 @@ namespace detail {
         AbstractExecutor* m_childExecutor;
         Table* m_outputTable;
         const char* m_inputTableName;
-        const char* m_outputTableName;
         const char* m_targetTableName;
-        int m_modifiedTuples;
+        size_t m_modifiedTuples;
         bool m_done;
     };
 
@@ -285,76 +283,79 @@ Input table will be empty in case of pull mode
     m_state.reset(new detail::InsertExecutorState(childExec, m_inputTable, outputTable, m_targetTable));
 }
 
-TableTuple InsertExecutor::p_next_pull() {
-
+TableIterator& InsertExecutor::p_next_pull(size_t& batchSize) {
     if (m_state->m_done) {
-        return TableTuple(m_node->getOutputTable()->schema());
-    }
+        batchSize = 0;
+        p_clear_output_table_pull();
+    } else {
+        //
+        // An insert is quite simple really. We just loop through our m_inputTable
+        // and insert any tuple that we find into our m_targetTable.
+        // It doesn't get any easier than that!
+        //
+        while (true) {
+            TableIterator& inputIt = m_state->m_childExecutor->next_pull(batchSize);
+            if (!inputIt.hasNext() || batchSize == 0) {
+                break;
+            }
+            size_t count = 0;
+            for (;inputIt.next(m_tuple) && count < batchSize; ++count) {
+                VOLT_TRACE("Inserting tuple '%s' into target table '%s' with table schema: %s",
+                           tuple.debug(m_targetTable->name()).c_str(), m_targetTable->name().c_str(),
+                           m_targetTable->schema()->debug().c_str());
+        //{ printf("\nDEBUG: %s %ld\n", "INSERTING NO PROBLEM, REALLY", (long)m_targetTable->activeTupleCount()); }
 
-    //
-    // An insert is quite simple really. We just loop through our m_inputTable
-    // and insert any tuple that we find into our m_targetTable.
-    // It doesn't get any easier than that!
-    //
-    while (true) {
-        TableTuple tuple = m_state->m_childExecutor->next_pull();
-        if (tuple.isNullTuple())
-        {
-            break;
-        }
-        VOLT_TRACE("Inserting tuple '%s' into target table '%s' with table schema: %s",
-                   tuple.debug(m_targetTable->name()).c_str(), m_targetTable->name().c_str(),
-                   m_targetTable->schema()->debug().c_str());
-//{ printf("\nDEBUG: %s %ld\n", "INSERTING NO PROBLEM, REALLY", (long)m_targetTable->activeTupleCount()); }
+                // if there is a partition column for the target table
+                if (m_partitionColumn != -1) {
 
-        // if there is a partition column for the target table
-        if (m_partitionColumn != -1) {
+                    // get the value for the partition column
+                    NValue value = m_tuple.getNValue(m_partitionColumn);
+                    bool isLocal = m_engine->isLocalSite(value);
 
-            // get the value for the partition column
-            NValue value = tuple.getNValue(m_partitionColumn);
-            bool isLocal = m_engine->isLocalSite(value);
+                    // if it doesn't map to this site
+                    if (!isLocal) {
+                        if (!m_multiPartition) {
+        //{ printf("\nDEBUG: %s\n", "NO NOT INSERTING NO PROBLEM, REALLY"); }
+                            char message[128];
+                            snprintf(message, 128, "Mispartitioned Tuple in single-partition plan.");
+                            VOLT_ERROR("%s", message);
+                            throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
+                        }
+                        // don't insert
+                        continue;
+                    }
+                }
 
-            // if it doesn't map to this site
-            if (!isLocal) {
-                if (!m_multiPartition) {
-//{ printf("\nDEBUG: %s\n", "NO NOT INSERTING NO PROBLEM, REALLY"); }
+                // for multi partition export tables,
+                //  only insert them into one place (the partition with hash(0))
+                if (m_isStreamed && m_multiPartition) {
+                    bool isLocal = m_engine->isLocalSite(ValueFactory::getBigIntValue(0));
+                    if (!isLocal) continue;
+                }
+
+                // try to put the tuple into the target table
+                if (!m_targetTable->insertTuple(m_tuple)) {
                     char message[128];
-                    snprintf(message, 128, "Mispartitioned Tuple in single-partition plan.");
+                    snprintf(message, 128, "Failed to insert tuple from input table '%s' into"
+                               " target table '%s'",
+                               m_state->m_inputTableName,
+                               m_state->m_targetTableName);
                     VOLT_ERROR("%s", message);
                     throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
                 }
-                // don't insert
-                continue;
             }
+            // successfully inserted
+            m_state->m_modifiedTuples += count;
         }
-
-        // for multi partition export tables,
-        //  only insert them into one place (the partition with hash(0))
-        if (m_isStreamed && m_multiPartition) {
-            bool isLocal = m_engine->isLocalSite(ValueFactory::getBigIntValue(0));
-            if (!isLocal) continue;
-        }
-
-        // try to put the tuple into the target table
-        if (!m_targetTable->insertTuple(tuple)) {
-            char message[128];
-            snprintf(message, 128, "Failed to insert tuple from input table '%s' into"
-                       " target table '%s'",
-                       m_state->m_inputTableName,
-                       m_state->m_targetTableName);
-            VOLT_ERROR("%s", message);
-            throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
-        }
-
-        // successfully inserted
-        ++m_state->m_modifiedTuples;
+        TableTuple countTuple = m_state->m_outputTable->tempTuple();
+        countTuple.setNValue(0, ValueFactory::getBigIntValue(m_state->m_modifiedTuples));
+        p_insert_output_table_pull(countTuple);
+        batchSize = 1;
+        m_state->m_done = true;
+        //{ printf("\nDEBUG: %s %ld\n", "INSERTED NO PROBLEM, REALLY", (long)m_targetTable->activeTupleCount()); }
     }
-    m_state->m_done = true;
-    TableTuple countTuple = m_node->getOutputTable()->tempTuple();
-    countTuple.setNValue(0, ValueFactory::getBigIntValue(m_state->m_modifiedTuples));
-//{ printf("\nDEBUG: %s %ld\n", "INSERTED NO PROBLEM, REALLY", (long)m_targetTable->activeTupleCount()); }
-
-    return countTuple;
+    
+    return m_state->m_outputTable->iterator();
 }
 
 void InsertExecutor::p_post_execute_pull() {
@@ -362,20 +363,4 @@ void InsertExecutor::p_post_execute_pull() {
     m_engine->m_tuplesModified += m_state->m_modifiedTuples;
     VOLT_INFO("Finished inserting tuple");
 //{ printf("\nDEBUG: %s %ld\n", "INSERT DONE NO PROBLEM, REALLY", (long)m_targetTable->activeTupleCount()); }
-}
-
-void InsertExecutor::p_insert_output_table_pull(TableTuple& tuple) {
-    // try to put the tuple into the output table
-    if (!m_state->m_outputTable->insertTuple(tuple)) {
-        char message[128];
-        snprintf(message, 128, "Failed to insert tuple count (%d) into"
-                               " output table '%s'",
-                m_state->m_modifiedTuples, m_state->m_outputTableName);
-        VOLT_ERROR("%s", message);
-        throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
-    }
-}
-
-bool InsertExecutor::support_pull() const {
-    return true;
 }

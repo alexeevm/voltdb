@@ -74,6 +74,7 @@ namespace detail {
             m_predicate(predicate),
             m_tupleCtr(0),
             m_targetTableTupleCount((int)targetTable->activeTupleCount()),
+            m_batchSize(0),
             m_targetTableSchema(targetTable->schema()),
             m_targetTableName(targetTable->name().c_str()),
             m_outputTableName(outputTable->name().c_str())
@@ -88,6 +89,7 @@ namespace detail {
         AbstractExpression* m_predicate;
         int m_tupleCtr;
         int m_targetTableTupleCount;
+        size_t m_batchSize;
         const TupleSchema* m_targetTableSchema;
         const char* m_targetTableName;
         const char* m_outputTableName;
@@ -300,7 +302,7 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
 
 
 //@TODO pullexec prototype
-TableIterator& SeqScanExecutor::p_next_pull(size_t batchSize) {
+TableIterator& SeqScanExecutor::p_next_pull(size_t& batchSize) {
     // Get the allowed size for the next batch
     size_t thisBatchSize = p_batch_size_pull();
     
@@ -326,7 +328,8 @@ TableIterator& SeqScanExecutor::p_next_pull(size_t batchSize) {
                 
             // Find the next tuple which satisfies it
             TableTuple tuple(m_state->m_targetTableSchema);
-            for (size_t count = 0; m_state->m_iterator.next(tuple) && count < batchSize; ++count) {
+            size_t count = 0;
+            for (; m_state->m_iterator.next(tuple) && count < batchSize; ++count) {
                 VOLT_TRACE("INPUT TUPLE: %s, %d/%d\n",
                            tuple.debug(m_state->m_targetTableName, m_state->m_tupleCtr,
                            m_state->m_targetTableTupleCount));
@@ -339,6 +342,11 @@ TableIterator& SeqScanExecutor::p_next_pull(size_t batchSize) {
             }
             // reset the output iterator
             m_state->m_outputTable->iterator();
+            // set the actual batch size
+            batchSize = m_state->m_batchSize = count;
+        } else {
+            // set the actual batch size
+            batchSize = m_state->m_batchSize - m_state->m_output_iterator.getLocation();
         }
         return m_state->m_output_iterator;
     }

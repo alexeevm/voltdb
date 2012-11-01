@@ -202,29 +202,34 @@ ProjectionExecutor::~ProjectionExecutor() {
 }
 
 
-TableTuple ProjectionExecutor::p_next_pull()
+TableIterator& ProjectionExecutor::p_next_pull(size_t& batchSize)
 {
-    TableTuple tuple = m_state->m_childExecutor->next_pull();
-    if (tuple.isNullTuple())
-    {
-        return tuple;
+    // Prepare the output table
+    p_clear_output_table_pull();
+    
+    TableIterator& tupleIt = m_state->m_childExecutor->next_pull(batchSize);
+    if (!tupleIt.hasNext() || batchSize == 0) {
+        return tupleIt;
     }
 
-    //
-    // Project (or replace) values from input tuple only if values
-    // are not all ParameterValueExpression ones. If they are, temp_tuple
-    // is already pre-computed
-    if (all_tuple_array != NULL) {
-        VOLT_TRACE("sweet, all tuples");
-        for (int ctr = m_columnCount - 1; ctr >= 0; --ctr) {
-            m_state->m_tempTuple.setNValue(ctr, tuple.getNValue(all_tuple_array[ctr]));
+    for (size_t i = 0; tupleIt.next(tuple) && i < batchSize; ++i) {
+        //
+        // Project (or replace) values from input tuple only if values
+        // are not all ParameterValueExpression ones. If they are, temp_tuple
+        // is already pre-computed
+        if (all_tuple_array != NULL) {
+            VOLT_TRACE("sweet, all tuples");
+            for (int ctr = m_columnCount - 1; ctr >= 0; --ctr) {
+                m_state->m_tempTuple.setNValue(ctr, tuple.getNValue(all_tuple_array[ctr]));
+            }
+        } else if (all_param_array == NULL) {
+            for (int ctr = m_columnCount - 1; ctr >= 0; --ctr) {
+                m_state->m_tempTuple.setNValue(ctr, expression_array[ctr]->eval(&tuple, NULL));
+            }
         }
-    } else if (all_param_array == NULL) {
-        for (int ctr = m_columnCount - 1; ctr >= 0; --ctr) {
-            m_state->m_tempTuple.setNValue(ctr, expression_array[ctr]->eval(&tuple, NULL));
-        }
+        p_insert_output_table_pull(m_state->m_tempTuple);
     }
-    return m_state->m_tempTuple;
+    return output_table->iterator();
 }
 
 void  ProjectionExecutor::p_pre_execute_pull(const NValueArray &params) {
@@ -268,10 +273,6 @@ void  ProjectionExecutor::p_pre_execute_pull(const NValueArray &params) {
             m_state->m_tempTuple.setNValue(ctr, params[all_param_array[ctr]]);
         }
     }
-}
-
-bool ProjectionExecutor::support_pull() const {
-    return true;
 }
 
 }

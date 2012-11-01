@@ -73,7 +73,7 @@ namespace voltdb
         bool p_execute(const NValueArray& params);
         bool needsOutputTableClear();
 
-        TableIterator&  p_next_pull(size_t batchSize);
+        TableIterator&  p_next_pull(size_t& batchSize);
         void p_pre_execute_pull(const NValueArray& params);
         void p_reset_state_pull();
         void p_clear_output_table_pull();

@@ -125,11 +125,8 @@ ReceiveExecutor::~ReceiveExecutor() {
 }
 
 //@TODO pullexec prototype
-TableTuple ReceiveExecutor::p_next_pull() {
-    TableTuple tuple(m_state->m_targetTableSchema);
-    if (!m_state->m_iterator.next(tuple))
-        tuple = TableTuple(m_state->m_targetTableSchema);
-    return tuple;
+TableIterator& ReceiveExecutor::p_next_pull(size_t& batchSize) {
+    return m_state->m_iterator;
 }
 
 void ReceiveExecutor::p_pre_execute_pull(const NValueArray &params) {
@@ -147,10 +144,6 @@ void ReceiveExecutor::p_pre_execute_pull(const NValueArray &params) {
     } while (loadedDeps > 0);
 
     m_state.reset(new detail::ReceiveExecutorState(output_table));
-}
-
-bool ReceiveExecutor::support_pull() const {
-    return true;
 }
 
 void ReceiveExecutor::p_reset_state_pull() {

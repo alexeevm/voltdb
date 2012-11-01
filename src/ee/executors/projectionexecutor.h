@@ -72,6 +72,8 @@ class Table;
 class ProjectionExecutor : public AbstractExecutor {
     public:
         ProjectionExecutor(VoltDBEngine *engine, AbstractPlanNode* abstract_node);
+        
+        bool needsPostExecuteClear();
 
         ~ProjectionExecutor();
 
@@ -79,6 +81,11 @@ class ProjectionExecutor : public AbstractExecutor {
         bool p_init(AbstractPlanNode*,
                     TempTableLimits* limits);
         bool p_execute(const NValueArray &params);
+        
+        TableIterator& p_next_pull(size_t& batchSize);
+        void p_pre_execute_pull(const NValueArray& params);
+        void p_clear_output_table_pull();
+        void p_insert_output_table_pull(TableTuple& tuple);
 
     private:
         TempTable* output_table;
@@ -95,15 +102,6 @@ class ProjectionExecutor : public AbstractExecutor {
         boost::shared_array<AbstractExpression*> expression_array_ptr;
         AbstractExpression** expression_array;
 
-        TableTuple p_next_pull();
-        bool support_pull() const;
-
-        //@TODO just a hack
-        bool needsPostExecuteClear() { return true; }
-
-        void p_pre_execute_pull(const NValueArray& params);
-        void p_insert_output_table_pull(TableTuple& tuple);
-
         // Has to be a pointer because it's an incomplete type at that point.
         // Moving definition to the header would clutter it with the
         // implementation details in my opinion.
@@ -111,11 +109,20 @@ class ProjectionExecutor : public AbstractExecutor {
         boost::scoped_ptr<detail::ProjectionExecutorState> m_state;
 };
 
+inline bool ProjectionExecutor::needsPostExecuteClear() { 
+    return true; 
+}
 
 inline void ProjectionExecutor::p_insert_output_table_pull(TableTuple& tuple)
 {
     assert(output_table);
     output_table->insertTupleNonVirtual(tuple);
+}
+
+inline void ProjectionExecutor::p_clear_output_table_pull()
+{
+    assert(output_table);
+    output_table->deleteAllTuples(false);
 }
 
 }

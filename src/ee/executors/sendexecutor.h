@@ -46,6 +46,8 @@
 #ifndef HSTORESENDEXECUTOR_H
 #define HSTORESENDEXECUTOR_H
 
+#include <boost/scoped_ptr.hpp>
+
 #include "common/common.h"
 #include "common/ids.h"
 #include "common/valuevector.h"
@@ -55,37 +57,41 @@ namespace voltdb {
 
 class SendPlanNode;
 
+// Aggregate Struct to keep Executor state in between iteration
+namespace detail
+{
+    struct SendExecutorState;
+} //namespace detail
+
 class SendExecutor : public AbstractExecutor
 {
 public:
-    SendExecutor(VoltDBEngine *engine, AbstractPlanNode* abstractNode)
-        : AbstractExecutor(engine, abstractNode)
-    {
-        m_inputTable = NULL;
-        m_engine = engine;
-    }
+    SendExecutor(VoltDBEngine *engine, AbstractPlanNode* abstractNode);
+        
+    // SendExecutors don't actually have output tables, so they
+    // don't require them to be cleared before executing
+    bool needsOutputTableClear() { return false; };
 
 protected:
     bool p_init(AbstractPlanNode*,
                 TempTableLimits* limits);
     bool p_execute(const NValueArray &params);
 
-    // SendExecutors don't actually have output tables, so they
-    // don't require them to be cleared before executing
-    virtual bool needsOutputTableClear() { return false; };
+
+    TableIterator& p_next_pull(size_t& batchSize);
+    void p_execute_pull();
+    void p_insert_output_table_pull(TableTuple& tuple);    
+    void p_pre_execute_pull(const NValueArray &params);
+    void p_clear_output_table_pull();
 
 private:
-    TableTuple p_next_pull();
-    bool support_pull() const;
-    void p_pre_execute_pull(const NValueArray &params);
-    void p_execute_pull();
-
     Table* m_inputTable;
     VoltDBEngine *m_engine;
+    boost::scoped_ptr<detail::SendExecutorState> m_state;
 };
 
-inline void SendExecutor::p_pre_execute_pull(const NValueArray &params)
-{}
+inline void SendExecutor::p_clear_output_table_pull() {
+}
 
 }
 

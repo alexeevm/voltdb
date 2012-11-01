@@ -189,14 +189,15 @@ void AbstractExecutor::p_execute_pull()
             TableTuple tuple(m_tmpOutputTable->schema());
             // iterate over the tuples
             size_t count = 0;
-            // Iterate over the batch. The number of tuple ready for 
-            // is not guaranteed to match the requested figure.
+            // Iterate over the batch. Iteration stops when either the iterator
+            // reaches the end or the number of the processed tuples exceeds
+            // the return value for the batchSize
             do {
                 // Extract next tuple from this executor input table
                 it.next(tuple);
                 // Insert processed tuple into the output table
                 this->p_insert_output_table_pull(tuple);
-            } while(it.hasNext()|| ++count < batchSize);
+            } while(it.hasNext() && ++count < batchSize);
         }
     }
 }

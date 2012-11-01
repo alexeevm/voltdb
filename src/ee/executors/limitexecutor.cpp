@@ -58,21 +58,25 @@ namespace detail {
 
     struct LimitExecutorState
     {
-        LimitExecutorState(int limit, int offset, AbstractExecutor* childExec, Table* input_table) :
+        LimitExecutorState(size_t limit, size_t offset, AbstractExecutor* childExec, 
+            Table* input_table, Table* output_table) :
             m_limit(limit),
             m_offset(offset),
-            m_tupleCtr(0),
             m_skipped(0),
+            m_tupleCtr(0),
             m_inputTableSchema(input_table->schema()),
-            m_childExecutor(childExec)
+            m_childExecutor(childExec),
+            m_emptyTupleIt(output_table->iterator())
         {}
 
-        int m_limit;
-        int m_offset;
-        int m_tupleCtr;
-        bool m_skipped;
+        size_t m_limit;
+        size_t m_offset;
+        size_t m_skipped;
+        size_t m_tupleCtr;
+        
         const TupleSchema* m_inputTableSchema;
         AbstractExecutor* m_childExecutor;
+        TableIterator m_emptyTupleIt;
     };
 
 } // namespace detail
@@ -158,22 +162,38 @@ LimitExecutor::p_execute(const NValueArray &params)
 }
 
 
-TableTuple LimitExecutor::p_next_pull() {
+TableIterator& LimitExecutor::p_next_pull(size_t& batchSize) {
+    
+    // Check if limit has run out
+    if (m_state->m_limit > 0 && m_state->m_tupleCtr >= m_state->m_limit) {
+        batchSize = 0;
+        return m_state->m_emptyTupleIt;
+    }
+    
     // Skip first offset tuples
-    for (;m_state->m_skipped < m_state->m_offset; ++m_state->m_skipped) {
-        TableTuple tuple = m_state->m_childExecutor->next_pull();
-        if (tuple.isNullTuple()) {
-            return tuple;
+    TableTuple tuple(m_state->m_inputTableSchema);
+    size_t retrieved = 0;
+    for (;m_state->m_skipped < m_state->m_offset;) {
+        TableIterator& tupleIt = m_state->m_childExecutor->next_pull(batchSize);
+        retrieved += batchSize;
+        if (!tupleIt.hasNext()) {
+            batchSize = 0;
+            return tupleIt; 
         }
-        ++m_state->m_skipped;
+        size_t count = 0;
+        for (;tupleIt.hasNext() && count < batchSize && m_state->m_skipped < m_state->m_offset;
+            ++m_state->m_skipped, ++count) {
+            tupleIt.next(tuple);
+        }
+        // If we skipped offset tuples but the latest batch still has few left
+        // Return it
+        if (m_state->m_skipped == m_state->m_offset && tupleIt.hasNext()) {
+            batchSize -= count;
+            return tupleIt;
+        }
     }
 
-    // Check if limit has run out
-    if (m_state->m_limit >= 0 && m_state->m_tupleCtr >= m_state->m_limit)
-        return TableTuple(m_state->m_inputTableSchema);
-
-    ++m_state->m_tupleCtr;
-    return m_state->m_childExecutor->next_pull();
+    return m_state->m_childExecutor->next_pull(batchSize);
 }
 
 void LimitExecutor::p_pre_execute_pull(const NValueArray &params) {
@@ -184,6 +204,9 @@ void LimitExecutor::p_pre_execute_pull(const NValueArray &params) {
     assert(node);
     Table* input_table = node->getInputTables()[0];
     assert(input_table);
+    Table* output_table = node->getOutputTable();
+    assert(output_table);
+    assert(output_table->activeTupleCount() == 0);
     int limit = 0;
     int offset = 0;
     node->getLimitAndOffsetByReference(params, limit, offset);
@@ -191,9 +214,5 @@ void LimitExecutor::p_pre_execute_pull(const NValueArray &params) {
     assert(children.size() == 1);
     AbstractExecutor* childExec = children[0]->getExecutor();
     assert(childExec);
-    m_state.reset(new detail::LimitExecutorState(limit, offset, childExec, input_table));
-}
-
-bool LimitExecutor::support_pull() const {
-    return true;
+    m_state.reset(new detail::LimitExecutorState(limit, offset, childExec, input_table, output_table));
 }

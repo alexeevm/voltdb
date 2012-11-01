@@ -70,25 +70,26 @@ namespace voltdb
     {
         public:
             LimitExecutor(VoltDBEngine* engine, AbstractPlanNode* abstract_node);
+            bool needsOutputTableClear() { return false; };
 
         protected:
             bool p_init(AbstractPlanNode*,
                         TempTableLimits* limits);
             bool p_execute(const NValueArray &params);
 
-        //@TODO pullexec prototype
-        public:
-            TableTuple p_next_pull();
-            bool support_pull() const;
-
-        protected:
-
+            //@TODO pullexec prototype
+            TableIterator& p_next_pull(size_t& batchSize);
             void p_pre_execute_pull(const NValueArray& params);
-
+            void p_clear_output_table_pull();
+            
         private:
 
             boost::scoped_ptr<detail::LimitExecutorState> m_state;
     };
+    
+    inline void LimitExecutor::p_clear_output_table_pull() {
+        // Nothing to do.
+    }
 
 }
 

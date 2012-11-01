@@ -81,7 +81,7 @@ class AbstractExecutor {
 
     /** Gets next available tuple(s) from input table as needed
      * and applies executor specific logic to produce its next tuple(s). */
-    TableIterator& next_pull(size_t batchSize);
+    TableIterator& next_pull(size_t& batchSize);
 
     /** Generic behavior wrapping the custom p_pre_execute_pull. */
     // @TODO: Does the need to prep m_tmpOutputTable really cut across executor classes?
@@ -187,10 +187,10 @@ class AbstractExecutor {
      * In particular, it pulls tuples from the output table that was populated by p_execute.
      * Gets next available tuple(s) from input table as needed
      * and applies executor specific logic to produce its next tuple. */
-    virtual TableIterator&  p_next_pull(size_t batchSize) = 0;
+    virtual TableIterator&  p_next_pull(size_t& batchSize) = 0;
     
     /** Helps clean up output tables of an executor and its dependencies. */
-    virtual void p_clear_output_table_pull() = 0;
+    virtual void p_clear_output_table_pull();
 
     /** Returns the suggested size for the next_pull call */
     virtual size_t p_batch_size_pull () const;
@@ -221,7 +221,7 @@ inline bool AbstractExecutor::execute(const NValueArray& params)
     return p_execute(params);
 }
 
-inline TableIterator& AbstractExecutor::next_pull(size_t batchSize)
+inline TableIterator& AbstractExecutor::next_pull(size_t& batchSize)
 {
     return this->p_next_pull(batchSize);
 }
@@ -317,6 +317,10 @@ inline size_t AbstractExecutor::p_batch_size_pull() const {
     return 10;
 }
 
+inline void AbstractExecutor::p_clear_output_table_pull() {
+        // @TODO Free allocated String ?
+        m_tmpOutputTable->deleteAllTuples(false);
+}
 
 }
 

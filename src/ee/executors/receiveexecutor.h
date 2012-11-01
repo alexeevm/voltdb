@@ -79,8 +79,9 @@ class ReceiveExecutor : public AbstractExecutor {
         bool p_init(AbstractPlanNode*,
                     TempTableLimits* limits);
         bool p_execute(const NValueArray &params);
-    private:
-        TableTuple p_next_pull();
+        
+        //@TODO pullexec prototype
+        TableIterator& p_next_pull(size_t& batchSize);
         void p_pre_execute_pull(const NValueArray& params);
         void p_reset_state_pull();
 

@@ -62,17 +62,23 @@ namespace detail {
 
 struct DistinctExecutorState
 {
-    DistinctExecutorState(AbstractExecutor* childExec, AbstractExpression* distinctExpr, Table* input_table):
+    DistinctExecutorState(AbstractExecutor* childExec, AbstractExpression* distinctExpr, Table* input_table, Table* output_table):
         m_childExecutor(childExec),
         m_distinctExpression(distinctExpr),
-        m_iterator(input_table->iterator()),
-        m_foundValues()
+        m_outputTable(output_table),
+        m_outputIterator(output_table->iterator()),
+        m_inputTuple(input_table->schema()),
+        m_foundValues(),
+        m_batchSize(0)
     {}
 
     AbstractExecutor* m_childExecutor;
     AbstractExpression* m_distinctExpression;
-    TableIterator m_iterator;
+    Table* m_outputTable;
+    TableIterator& m_outputIterator;
+    TableTuple m_inputTuple;
     std::set<NValue, NValue::ltNValue> m_foundValues;
+    size_t m_batchSize;
 };
 
 } // namespace detail
@@ -145,21 +151,48 @@ DistinctExecutor::~DistinctExecutor() {
 }
 
 
-TableTuple DistinctExecutor::p_next_pull() {
-    AbstractExecutor* childExec = m_state->m_childExecutor;
-    AbstractExpression* distinctExpr = m_state->m_distinctExpression;
-    std::set<NValue, NValue::ltNValue>& foundValues = m_state->m_foundValues;
-    TableTuple tuple; // childExec will init schema.
-    for (tuple = childExec->next_pull();
-         tuple.isNullTuple() == false;
-         tuple = childExec->next_pull()) {
-        NValue tuple_value = distinctExpr->eval(&tuple, NULL);
-        if (foundValues.find(tuple_value) == foundValues.end()) {
-            foundValues.insert(tuple_value);
-            break;
+TableIterator& DistinctExecutor::p_next_pull(size_t& batchSize) {
+    
+    size_t thisBatchSize = p_batch_size_pull();
+    // Check if there is something left in the output table.
+    // If not, then process the next batch. Otherwise, simply return the temp table iterator
+    if (!m_state->m_outputIterator.hasNext()) {
+        // Clear output table to keep the next batch
+        p_clear_output_table_pull();
+
+        // Adjust the requested batch size not to exceed the allowed one
+        // @TODO Do really need it?
+        if (batchSize > thisBatchSize) {
+            batchSize = thisBatchSize;
         }
+
+        size_t count = 0;
+        while (count < batchSize) {
+            TableIterator& inputIt = m_state->m_childExecutor->next_pull(batchSize);
+            if (!inputIt.hasNext() || batchSize == 0) {
+                break;
+            }
+            while (inputIt.next(m_state->m_inputTuple) && count < batchSize) {
+                NValue tuple_value = m_state->m_distinctExpression->eval(&m_state->m_inputTuple, NULL);
+                if (m_state->m_foundValues.find(tuple_value) == m_state->m_foundValues.end()) {
+                    // Insert into the unique set
+                    m_state->m_foundValues.insert(tuple_value);
+                    // Insert into the output table
+                    p_insert_output_table_pull(m_state->m_inputTuple);
+                    ++count;
+                }
+            }
+        }
+        
+        // reset the output iterator
+        m_state->m_outputTable->iterator();
+        // set the actual batch size
+        batchSize = m_state->m_batchSize = count;
+    } else {
+        // set the actual batch size
+        batchSize = m_state->m_batchSize - m_state->m_outputIterator.getLocation();
     }
-    return tuple;
+    return m_state->m_outputIterator;
 }
 
 void DistinctExecutor::p_pre_execute_pull(const NValueArray &params) {
@@ -168,6 +201,8 @@ void DistinctExecutor::p_pre_execute_pull(const NValueArray &params) {
     //
     DistinctPlanNode* node = dynamic_cast<DistinctPlanNode*>(getPlanNode());
     assert(node);
+    Table* output_table = node->getOutputTable();
+    assert(output_table);
     Table* input_table = node->getInputTables()[0];
     assert(input_table);
     std::vector<AbstractPlanNode*>& children = node->getChildren();
@@ -177,9 +212,5 @@ void DistinctExecutor::p_pre_execute_pull(const NValueArray &params) {
     //@TODO: Some day params may have to be factored into generalized distinct expressions.
     AbstractExpression* distinctExpr = node->getDistinctExpression();
     assert(distinctExpr);
-    m_state.reset(new detail::DistinctExecutorState(childExec, distinctExpr, input_table));
-}
-
-bool DistinctExecutor::support_pull() const {
-    return true;
+    m_state.reset(new detail::DistinctExecutorState(childExec, distinctExpr, input_table, output_table));
 }
