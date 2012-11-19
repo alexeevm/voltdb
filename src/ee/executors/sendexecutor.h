@@ -82,6 +82,7 @@ protected:
     void p_execute_pull();
     void p_insert_output_table_pull(TableTuple& tuple);    
     void p_pre_execute_pull(const NValueArray &params);
+    void p_post_execute_pull();    
     void p_clear_output_table_pull();
 
 private:
@@ -89,9 +90,6 @@ private:
     VoltDBEngine *m_engine;
     boost::scoped_ptr<detail::SendExecutorState> m_state;
 };
-
-inline void SendExecutor::p_clear_output_table_pull() {
-}
 
 }
 

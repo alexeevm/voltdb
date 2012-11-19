@@ -145,7 +145,9 @@ bool AbstractExecutor::init(VoltDBEngine* engine,
 }
 
 AbstractExecutor::AbstractExecutor(VoltDBEngine* engine, AbstractPlanNode* abstractNode):
-    m_abstractNode(abstractNode), m_tmpOutputTable(NULL)
+    m_abstractNode(abstractNode), m_tmpOutputTable(NULL),
+    needs_outputtable_clear_cached(false),
+    m_needs_output_table_clear_pull(false)
 {}
 
 AbstractExecutor::~AbstractExecutor() {}
@@ -178,75 +180,29 @@ bool AbstractExecutor::execute_pull(const NValueArray& params)
 void AbstractExecutor::p_execute_pull()
 {
     // Get the batch size
-    size_t batchSize = this->p_batch_size_pull();
+    size_t batchSize = 0;
+    Table* outputTable = this->getPlanNode()->getOutputTable();
+    TableTuple tuple(outputTable->schema());
     // iteration stops when next_pull returns an empty iterator
     while (true)
     {
         TableIterator& it = next_pull(batchSize);
-        if (!it.hasNext()) {
+        if (!it.hasNext() || batchSize == 0) {
             break;
         } else {
-            TableTuple tuple(m_tmpOutputTable->schema());
-            // iterate over the tuples
-            size_t count = 0;
             // Iterate over the batch. Iteration stops when either the iterator
             // reaches the end or the number of the processed tuples exceeds
             // the return value for the batchSize
-            do {
-                // Extract next tuple from this executor input table
-                it.next(tuple);
+            for (size_t i = 0; i < batchSize && it.next(tuple); ++i){
                 // Insert processed tuple into the output table
                 this->p_insert_output_table_pull(tuple);
-            } while(it.hasNext() && ++count < batchSize);
+            }
         }
     }
 }
 
-/*
-static void add_to_list(AbstractExecutor* exec, std::vector<AbstractExecutor*>& list)
-{
-    list.push_back(exec);
+size_t AbstractExecutor::p_batch_size_pull() const {
+    //@TODO
+    return 3;
 }
-*/
 
-//@TODO To accomodate executors that have not been updated to implement the pull protocol,
-// this implementation provides an adaptor to the older push protocol.
-// This allows VoltDBEngine to switch over immediately to using the pull protocol.
-// Any node that does not actually implement a custom p_pre_execute_pull/p_next_pull
-// instead inherits this sub-optimal default behavior AbstractExecutor that:
-// Implements p_pre_execute_pull to do the following:
-// - Recursively constructs a (depth-first) list of its child(ren).
-// - Calls execute on each of them, and finally itself.
-// Implements p_next_pull to retrieve each row from its output table (previously populated by its execute method).
-void AbstractExecutor::p_pre_execute_pull(const NValueArray& params)
-{
-    assert(false);
-/*
-    // Build the depth-first children list.
-    std::vector<AbstractExecutor*> execs;
-    boost::function<void(AbstractExecutor*)> faddtolist =
-        boost::bind(&add_to_list, _1, boost::ref(execs));
-    // The second parameter (stop when hit non-pull aware executor) is false here
-    // because we want to call the push executor on the full list of children.
-    depth_first_iterate_pull(faddtolist, false);
-
-    // Walk through the queue and execute each plannode.  The query
-    // planner guarantees that for a given plannode, all of its
-    // children are positioned before it in this list, therefore
-    // dependency tracking is not needed here.
-    size_t ttl = execs.size();
-    for (size_t ctr = 0; ctr < ttl; ++ctr)
-    {
-        AbstractExecutor* executor = execs[ctr];
-        assert(executor);
-
-        if (!executor->execute(params))
-        {
-            VOLT_TRACE("The Executor's execution failed");
-            // set these back to -1 for error handling
-            throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
-                                          "The Executor's execution failed");
-        }
-    }
-*/
-}

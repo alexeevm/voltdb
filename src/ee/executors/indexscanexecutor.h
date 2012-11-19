@@ -89,12 +89,18 @@ public:
     void set_search_key_pull(const TableTuple* other);
     void set_expressions_pull(const NValueArray &params);
 
-private:
-    bool support_pull() const;
-
+protected:
+    
     bool p_init(AbstractPlanNode*,
-                TempTableLimits* limits);
+            TempTableLimits* limits);
     bool p_execute(const NValueArray &params);
+
+    TableIterator&  p_next_pull(size_t& batchSize);
+    void p_pre_execute_pull(const NValueArray& params);
+    void p_insert_output_table_pull(TableTuple& tuple);
+    void p_reset_state_pull();
+    
+private:
 
     // Data in this class is arranged roughly in the order it is read for
     // p_execute(). Please don't reshuffle it only in the name of beauty.
@@ -145,11 +151,12 @@ private:
 
 private:
 
-    TableTuple p_next_pull();
-    void p_pre_execute_pull(const NValueArray& params);
-
     boost::scoped_ptr<detail::IndexScanExecutorState> m_state;
 };
+
+inline void IndexScanExecutor::p_insert_output_table_pull(TableTuple& tuple) {
+    m_outputTable->insertTupleNonVirtual(tuple);
+}
 
 }
 

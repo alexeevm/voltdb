@@ -61,13 +61,13 @@ class ReadWriteSet;
 class UnionExecutor : public AbstractExecutor {
     public:
         UnionExecutor(VoltDBEngine *engine, AbstractPlanNode* abstract_node) : AbstractExecutor(engine, abstract_node) { }
-        bool support_pull() const;
 
     protected:
         bool p_init(AbstractPlanNode*,
                     TempTableLimits* limits);
         bool p_execute(const NValueArray &params);
 
+        TableIterator& p_next_pull(size_t& batchSize);
         void p_pre_execute_pull(const NValueArray& params);
 };
 

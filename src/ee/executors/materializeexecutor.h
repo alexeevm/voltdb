@@ -74,16 +74,15 @@ class MaterializeExecutor : public AbstractExecutor {
   public:
     MaterializeExecutor(VoltDBEngine *engine, AbstractPlanNode* abstract_node);
 
-    bool support_pull() const;
-
   protected:
     bool p_init(AbstractPlanNode*,
                 TempTableLimits* limits);
     bool p_execute(const NValueArray &params);
 
-    TableTuple p_next_pull();
+    TableIterator& p_next_pull(size_t& batchSize);
     void p_pre_execute_pull(const NValueArray& params);
     void p_insert_output_table_pull(TableTuple& tuple);
+    void p_post_execute_pull();
 
   private:
     MaterializePlanNode* node;

@@ -73,14 +73,12 @@ namespace voltdb {
         OrderByExecutor(VoltDBEngine *engine, AbstractPlanNode* abstract_node);
         ~OrderByExecutor();
 
-        bool support_pull() const;
-
     protected:
         bool p_init(AbstractPlanNode* abstract_node,
                     TempTableLimits* limits);
         bool p_execute(const NValueArray &params);
 
-        TableTuple p_next_pull();
+        TableIterator&  p_next_pull(size_t& batchSize);
         void p_pre_execute_pull(const NValueArray& params);
 
     private:

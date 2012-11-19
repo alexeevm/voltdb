@@ -202,7 +202,9 @@ void DeleteExecutor::p_pre_execute_pull(const NValueArray &params)
 TableIterator& DeleteExecutor::p_next_pull(size_t& batchSize) {
     if (m_state->m_done) {
         batchSize = 0;
-        p_clear_output_table_pull();
+        if (!get_output_table_clear_pull()) {
+            p_clear_output_table_pull();
+        }
     } else {
         if (m_truncate) {
             VOLT_TRACE("truncating table %s...", m_targetTable->name().c_str());
@@ -217,7 +219,7 @@ TableIterator& DeleteExecutor::p_next_pull(size_t& batchSize) {
                     break;
                 }
                 size_t count = 0;
-                for (;inputIt.next(m_inputTuple) && count < batchSize; ++count) {
+                for (;count < batchSize && inputIt.next(m_inputTuple); ++count) {
                     //
                     // OPTIMIZATION: Single-Sited Query Plans
                     // If our beloved DeletePlanNode is apart of a single-site query plan,

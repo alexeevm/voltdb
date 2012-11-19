@@ -152,12 +152,14 @@ bool UnionExecutor::p_execute(const NValueArray &params) {
     return (true);
 }
 
-bool UnionExecutor::support_pull() const
+void UnionExecutor::p_pre_execute_pull(const NValueArray &params)
 {
-    return true;
+    char message[128];
+    snprintf(message, 128, "Union opertion is not supported");
+    throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
 }
 
-void UnionExecutor::p_pre_execute_pull(const NValueArray &params)
+TableIterator& UnionExecutor::p_next_pull(size_t& batchSize)
 {
     char message[128];
     snprintf(message, 128, "Union opertion is not supported");

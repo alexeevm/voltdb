@@ -285,8 +285,10 @@ Input table will be empty in case of pull mode
 
 TableIterator& InsertExecutor::p_next_pull(size_t& batchSize) {
     if (m_state->m_done) {
+        if (batchSize != 0) {
+            p_clear_output_table_pull();
+        }
         batchSize = 0;
-        p_clear_output_table_pull();
     } else {
         //
         // An insert is quite simple really. We just loop through our m_inputTable

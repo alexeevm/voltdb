@@ -86,13 +86,12 @@ public:
     ~NestLoopIndexExecutor();
 
 private:
-    bool support_pull() const;
 
     bool p_init(AbstractPlanNode*,
                 TempTableLimits* limits);
     bool p_execute(const NValueArray &params);
 
-    TableTuple p_next_pull();
+    TableIterator& p_next_pull(size_t& batchSize);
     void p_pre_execute_pull(const NValueArray& params);
     void p_post_execute_pull();
     void reset_inner_state();

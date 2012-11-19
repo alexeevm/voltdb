@@ -122,25 +122,33 @@ void SendExecutor::p_pre_execute_pull(const NValueArray &params){
     std::vector<AbstractPlanNode*>& children = getPlanNode()->getChildren();
     assert(children.size() == 1);
     AbstractExecutor* childExec = children[0]->getExecutor();
+    childExec->set_output_table_clear_pull(true);
+    
     m_state.reset(new detail::SendExecutorState(childExec));
+    VOLT_DEBUG("started SEND");
+}
+
+void SendExecutor::p_post_execute_pull(){
+
+    VOLT_DEBUG("SEND TABLE: %s", m_inputTable->debug().c_str());
 }
 
 void SendExecutor::p_execute_pull() {
-    VOLT_DEBUG("started SEND");
     assert(m_inputTable);
 
-    std::vector<AbstractPlanNode*>& children = getPlanNode()->getChildren();
-    assert(children.size() == 1);
-    AbstractExecutor* childExec = children[0]->getExecutor();
+    // iteration stops when next_pull returns an empty iterator
+    TableTuple temp(m_inputTable->schema());
+    while (true)
+    {
+        size_t batchSize = 0;
+        TableIterator& it = next_pull(batchSize);
+        if (!it.hasNext() || batchSize == 0) {
+            break;
+        }
+        // @TODO Skip returned tuples.
+        it.setDone();
+    }    
 
-    // We only need to save tuple in Send Executor if
-    // 1. It's input table is a temp table
-    bool needSave = (dynamic_cast<TempTable*>(getPlanNode()->getOutputTable()) != NULL)
-        && childExec->parent_send_need_save_tuple_pull();
-    if (needSave) {
-       AbstractExecutor::p_execute_pull(); 
-    }
-    
     // Just blast the input table on through VoltDBEngine!
     if (!m_engine->send(m_inputTable)) {
         char message[128];
@@ -150,7 +158,6 @@ void SendExecutor::p_execute_pull() {
         throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
                                       message);
     }
-    VOLT_DEBUG("SEND TABLE: %s", m_inputTable->debug().c_str());
 }
 
 TableIterator& SendExecutor::p_next_pull(size_t& batchSize) {
@@ -167,6 +174,9 @@ void SendExecutor::p_insert_output_table_pull(TableTuple& tuple) {
         throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
                                       message);
     }
+}
+
+void SendExecutor::p_clear_output_table_pull() {
 }
 
 } // namespace voltdb

@@ -73,7 +73,6 @@ class ReceiveExecutor : public AbstractExecutor {
         ~ReceiveExecutor();
 
         bool needsPostExecuteClear() { return true; }
-        bool support_pull() const;
 
     protected:
         bool p_init(AbstractPlanNode*,

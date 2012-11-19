@@ -301,7 +301,12 @@ bool NestLoopExecutor::p_execute(const NValueArray &params) {
 }
 
 //@TODO pullexec prototype
-TableTuple NestLoopExecutor::p_next_pull() {
+TableIterator&  NestLoopExecutor::p_next_pull(size_t& batchSize) {
+
+    char message[128];
+    snprintf(message, 128, "NestLoopExecutor is not supported");
+    throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
+/*
     bool hasNext = false;
     TableTuple joinedTuple = m_state->m_outputTable->tempTuple();
     while (!hasNext)
@@ -347,6 +352,7 @@ TableTuple NestLoopExecutor::p_next_pull() {
     }
 
     return joinedTuple;
+*/
 }
 
 void NestLoopExecutor::p_pre_execute_pull(const NValueArray &params) {
@@ -392,10 +398,6 @@ void NestLoopExecutor::p_pre_execute_pull(const NValueArray &params) {
 
     m_state.reset(new detail::NestLoopExecutorState(predicate, output_table,
         outer_executor, inner_executor, outer_table->schema(), outer_cols, inner_cols));
-}
-
-bool NestLoopExecutor::support_pull() const {
-    return true;
 }
 
 void NestLoopExecutor::reset_inner_state() {

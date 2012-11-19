@@ -379,7 +379,7 @@ int VoltDBEngine::executeQuery(int64_t planfragmentId,
             VOLT_TRACE("The Executor's execution at position '%d'"
                        " failed for PlanFragment '%jd'",
                        ctr, (intmax_t)planfragmentId);
-            executor->clear_output_tables();
+            executor->clear_output_tables_pull();
             resetReusedResultOutputBuffer();
             e.serialize(getExceptionOutputSerializer());
 
@@ -391,7 +391,7 @@ int VoltDBEngine::executeQuery(int64_t planfragmentId,
         // @TODO currently we do clean-up twice.
         // First time during the execute_pull call as part of the pre_execute_pull call for each executor
         // Second time here
-        executor->clear_output_tables();
+        executor->clear_output_tables_pull();
     }
 
     // assume this is sendless dml

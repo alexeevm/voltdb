@@ -61,15 +61,21 @@ namespace detail {
 
 struct MaterializeExecutorState
 {
-    MaterializeExecutorState(int tupleCnt, const NValueArray &params) :
+    MaterializeExecutorState(int tupleCnt, const NValueArray &params, Table* outputTable) :
         m_tupleCnt(tupleCnt),
         m_tupleIdx(0),
-        m_params(params)
+        m_batchSize(0),
+        m_params(params),
+        m_outputTable(outputTable),
+        m_outputIterator(outputTable->iterator())
     {}
 
     int m_tupleCnt;
     int m_tupleIdx;
+    size_t m_batchSize;
     NValueArray m_params;
+    Table* m_outputTable;
+    TableIterator& m_outputIterator;
 };
 
 } // namespace detail
@@ -191,12 +197,6 @@ bool MaterializeExecutor::p_execute(const NValueArray &params) {
     return true;
 }
 
-
-bool MaterializeExecutor::support_pull() const
-{
-    return true;
-}
-
 void MaterializeExecutor::p_pre_execute_pull(const NValueArray &params)
 {
     assert (node == dynamic_cast<MaterializePlanNode*>(getPlanNode()));
@@ -221,21 +221,37 @@ void MaterializeExecutor::p_pre_execute_pull(const NValueArray &params)
             }
         }
     }
-    m_state.reset(new detail::MaterializeExecutorState(tupleCnt, params));
+    m_state.reset(new detail::MaterializeExecutorState(tupleCnt, params, output_table));
 }
 
-TableTuple MaterializeExecutor::p_next_pull()
-{
+TableIterator& MaterializeExecutor::p_next_pull(size_t& batchSize) {
+    // Are we done?
     if (m_state->m_tupleIdx == m_state->m_tupleCnt) {
-        return TableTuple(output_table->schema());
+        batchSize = 0;
+        return m_state->m_outputIterator;
     }
 
+    // Check if there is something left in the output table.
+    if (m_state->m_outputIterator.hasNext()) {
+        // set the actual batch size
+        batchSize = m_state->m_batchSize - m_state->m_outputIterator.getLocation();
+        return m_state->m_outputIterator;
+    }
+    
+    // Clear output table to keep the next batch
+    p_clear_output_table_pull();
+        
     TableTuple &temp_tuple = output_table->tempTuple();
     if (batched) {
-        for (int j = m_columnCount - 1; j >= 0; --j) {
-            temp_tuple.setNValue(j, m_state->m_params[m_state->m_tupleIdx * m_columnCount + j]);
+        assert(m_state->m_tupleIdx < m_state->m_tupleCnt);
+        size_t count = std::min((int)batchSize, m_state->m_tupleCnt - m_state->m_tupleIdx);
+        for (batchSize = 0; m_state->m_tupleIdx < count; ++m_state->m_tupleIdx, ++batchSize) {
+            for (int j = m_columnCount - 1; j >= 0; --j) {
+                temp_tuple.setNValue(j, m_state->m_params[m_state->m_tupleIdx * m_columnCount + j]);
+            }
+            p_insert_output_table_pull(temp_tuple);
         }
-
+        m_state->m_batchSize = batchSize;
     } else {
 
         // For now a MaterializePlanNode can make at most one new tuple We
@@ -256,11 +272,17 @@ TableTuple MaterializeExecutor::p_next_pull()
                 temp_tuple.setNValue(ctr, expression_array[ctr]->eval(&dummy, NULL));
             }
         }
+        p_insert_output_table_pull(temp_tuple);
+        m_state->m_batchSize = batchSize = 1;
+        ++m_state->m_tupleIdx;
     }
-    ++m_state->m_tupleIdx;
-
+    //reset iterator
+    m_state->m_outputTable->iterator();
+    return m_state->m_outputIterator;
+}
+void MaterializeExecutor::p_post_execute_pull()
+{
     VOLT_TRACE ("Materialized :\n %s", temp_tuple.debug(this->output_table->name()));
-    return temp_tuple;
 }
 
 void MaterializeExecutor::p_insert_output_table_pull(TableTuple& tuple)

@@ -60,12 +60,13 @@ namespace detail {
     {
         LimitExecutorState(size_t limit, size_t offset, AbstractExecutor* childExec, 
             Table* input_table, Table* output_table) :
-            m_limit(limit),
+            m_limit((limit == 0) ? std::numeric_limits<size_t>::max() : limit),
             m_offset(offset),
             m_skipped(0),
             m_tupleCtr(0),
             m_inputTableSchema(input_table->schema()),
             m_childExecutor(childExec),
+            m_outputTable(output_table),
             m_emptyTupleIt(output_table->iterator())
         {}
 
@@ -76,6 +77,7 @@ namespace detail {
         
         const TupleSchema* m_inputTableSchema;
         AbstractExecutor* m_childExecutor;
+        Table* m_outputTable;
         TableIterator m_emptyTupleIt;
     };
 
@@ -165,7 +167,7 @@ LimitExecutor::p_execute(const NValueArray &params)
 TableIterator& LimitExecutor::p_next_pull(size_t& batchSize) {
     
     // Check if limit has run out
-    if (m_state->m_limit > 0 && m_state->m_tupleCtr >= m_state->m_limit) {
+    if (m_state->m_tupleCtr >= m_state->m_limit) {
         batchSize = 0;
         return m_state->m_emptyTupleIt;
     }
@@ -181,19 +183,47 @@ TableIterator& LimitExecutor::p_next_pull(size_t& batchSize) {
             return tupleIt; 
         }
         size_t count = 0;
-        for (;tupleIt.hasNext() && count < batchSize && m_state->m_skipped < m_state->m_offset;
-            ++m_state->m_skipped, ++count) {
+        for (;count < batchSize && m_state->m_skipped < m_state->m_offset &&
             tupleIt.next(tuple);
+            ++m_state->m_skipped, ++count) {
         }
         // If we skipped offset tuples but the latest batch still has few left
         // Return it
         if (m_state->m_skipped == m_state->m_offset && tupleIt.hasNext()) {
             batchSize -= count;
-            return tupleIt;
+            m_state->m_tupleCtr = batchSize;
+            if (m_state->m_tupleCtr >= m_state->m_limit) {
+                batchSize = m_state->m_limit;
+            }
+            // Check whether limit needs to save the tuples
+            if (get_output_table_clear_pull()) {
+                for(size_t i = 0; i < batchSize && tupleIt.next(tuple); ++i) {
+                    p_insert_output_table_pull(tuple);
+                }
+                return m_state->m_outputTable->iterator();    
+            } else {
+                return tupleIt;
+            }
         }
     }
-
-    return m_state->m_childExecutor->next_pull(batchSize);
+    
+    // Proceed until limit runs out 
+    TableIterator& tupleIt = m_state->m_childExecutor->next_pull(batchSize);
+    if (get_output_table_clear_pull()) {
+        if (m_state->m_tupleCtr + batchSize >= m_state->m_limit) {
+            batchSize = m_state->m_limit - m_state->m_tupleCtr;
+        }
+        m_state->m_tupleCtr += batchSize;
+        for(size_t i = 0; i < batchSize && tupleIt.next(tuple); ++i) {
+            p_insert_output_table_pull(tuple);
+            m_state->m_outputTable->iterator();    
+        }
+        // @TODO ; we are resetting iterator to point to the FIRST tuple
+        // we need to advance it instead. So far this is OK sinse the parent
+        // executor is the SEND which doesn't care.
+        return m_state->m_outputTable->iterator();    
+    } 
+    return tupleIt;
 }
 
 void LimitExecutor::p_pre_execute_pull(const NValueArray &params) {

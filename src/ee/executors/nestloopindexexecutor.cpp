@@ -560,11 +560,6 @@ NestLoopIndexExecutor::~NestLoopIndexExecutor()
     delete [] index_values_backing_store;
 }
 
-bool NestLoopIndexExecutor::support_pull() const
-{
-    return true;
-}
-
 void NestLoopIndexExecutor::p_pre_execute_pull(const NValueArray& params)
 {
     assert (node == dynamic_cast<NestLoopIndexPlanNode*>(getPlanNode()));
@@ -607,7 +602,12 @@ void NestLoopIndexExecutor::p_post_execute_pull() {
     VOLT_TRACE("Finished NestLoopIndex");
 }
 
-TableTuple NestLoopIndexExecutor::p_next_pull() {
+TableIterator& NestLoopIndexExecutor::p_next_pull(size_t& batchSize) {
+    char message[128];
+    snprintf(message, 128, "NestLoopIndexExecutor is not supported");
+    throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
+
+/*
     //
     // OUTER TABLE ITERATION
     //
@@ -688,4 +688,5 @@ TableTuple NestLoopIndexExecutor::p_next_pull() {
     }
 
     return joinedTuple;
+*/
 }

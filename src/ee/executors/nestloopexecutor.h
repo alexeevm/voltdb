@@ -69,18 +69,17 @@ class ReadWriteSet;
 class NestLoopExecutor : public AbstractExecutor {
     public:
         NestLoopExecutor(VoltDBEngine *engine, AbstractPlanNode* abstract_node);
-        bool support_pull() const;
 
     protected:
         bool p_init(AbstractPlanNode*,
                     TempTableLimits* limits);
         bool p_execute(const NValueArray &params);
 
-    private:
+        TableIterator& p_next_pull(size_t& batchSize);
         void reset_inner_state();
-        TableTuple p_next_pull();
         void p_pre_execute_pull(const NValueArray& params);
 
+    private:
         boost::scoped_ptr<detail::NestLoopExecutorState> m_state;
 };
 

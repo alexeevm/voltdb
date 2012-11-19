@@ -84,7 +84,6 @@ class ProjectionExecutor : public AbstractExecutor {
         
         TableIterator& p_next_pull(size_t& batchSize);
         void p_pre_execute_pull(const NValueArray& params);
-        void p_clear_output_table_pull();
         void p_insert_output_table_pull(TableTuple& tuple);
 
     private:
@@ -117,12 +116,6 @@ inline void ProjectionExecutor::p_insert_output_table_pull(TableTuple& tuple)
 {
     assert(output_table);
     output_table->insertTupleNonVirtual(tuple);
-}
-
-inline void ProjectionExecutor::p_clear_output_table_pull()
-{
-    assert(output_table);
-    output_table->deleteAllTuples(false);
 }
 
 }

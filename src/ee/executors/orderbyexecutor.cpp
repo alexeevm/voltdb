@@ -234,13 +234,12 @@ OrderByExecutor::OrderByExecutor(VoltDBEngine *engine, AbstractPlanNode* abstrac
 OrderByExecutor::~OrderByExecutor() {
 }
 
-bool OrderByExecutor::support_pull() const
-{
-    return true;
-}
-
 void OrderByExecutor::p_pre_execute_pull(const NValueArray& params)
 {
+    char message[128];
+    snprintf(message, 128, "OrderByExecutor is not supported");
+    throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
+/*
     OrderByPlanNode* node = dynamic_cast<OrderByPlanNode*>(getPlanNode());
     assert(node);
     Table* input_table = node->getInputTables()[0];
@@ -268,14 +267,21 @@ void OrderByExecutor::p_pre_execute_pull(const NValueArray& params)
                                              node->getSortDirections()));
     m_state->m_it = m_state->m_xs.begin();
     VOLT_TRACE("\n***** Input Table PostSort:\n '%s'", debug().c_str());
+*/
 }
 
-TableTuple OrderByExecutor::p_next_pull() {
+TableIterator&  OrderByExecutor::p_next_pull(size_t& batchSize) {
+/*
     if (m_state->m_it != m_state->m_xs.end()) {
         return *m_state->m_it++;
     } else {
         return TableTuple(m_state->m_inputSchema);
     }
+*/
+    char message[128];
+    snprintf(message, 128, "OrderByExecutor is not supported");
+    throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
+    
 }
 
 std::string OrderByExecutor::debug() const {

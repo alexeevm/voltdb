@@ -49,6 +49,7 @@
 #include "common/common.h"
 #include "common/tabletuple.h"
 #include "common/FatalException.hpp"
+#include "common/ValueFactory.hpp"
 #include "expressions/abstractexpression.h"
 #include "expressions/expressionutil.h"
 
@@ -70,21 +71,33 @@ namespace detail {
     struct IndexScanExecutorState
     {
         IndexScanExecutorState(const TupleSchema* schema, AbstractExpression* endExpression,
-            AbstractExpression* postExpression) :
+            AbstractExpression* postExpression, Table* outputTable) :
             m_targetTableSchema(schema),
+            m_outputTable(outputTable),
             m_endExpression(endExpression),
             m_postExpression(postExpression),
             m_firstTuple(NULL),
             m_secondTuple(NULL),
-            m_done(false)
-        {}
+            m_outputIterator(outputTable->iterator()),
+            m_done(false),
+            m_useTargetSchema(true)
+        {            
+            // @TODO can we do better?
+            if (m_outputTable->columnCount() == 1 &&
+                m_outputTable->columnName(0) == "tuple_address") {
+                m_useTargetSchema = false;
+            }
+        }
 
         const TupleSchema* m_targetTableSchema;
+        Table* m_outputTable;
         AbstractExpression* m_endExpression;
         AbstractExpression* m_postExpression;
         const TableTuple *m_firstTuple;
         const TableTuple *m_secondTuple;
+        TableIterator& m_outputIterator;
         bool m_done;
+        bool m_useTargetSchema;
     };
 
 } // namespace detail
@@ -558,16 +571,33 @@ IndexScanExecutor::~IndexScanExecutor() {
 }
 
 //@TODO pullexec prototype
-bool IndexScanExecutor::support_pull() const {
-    return true;
-}
 
-TableTuple IndexScanExecutor::p_next_pull() {
-
+TableIterator& IndexScanExecutor::p_next_pull(size_t& batchSize) {
+    // Are we done?
     if (m_state->m_done) {
-        return m_tuple;
+        batchSize = 0;
+        return m_state->m_outputIterator;
     }
-    while (true)
+    
+    // Check if there is something left in the output table.
+    // If not, then process the next batch. Otherwise, simply return the temp table iterator
+    if (m_state->m_outputIterator.hasNext()) {
+        // set the actual batch size
+        batchSize = m_state->m_outputTable->activeTupleCount() - m_state->m_outputIterator.getLocation();
+        return m_state->m_outputIterator;
+    }
+    
+    // Clear output table to keep the next batch
+    if (!get_output_table_clear_pull()) {
+        p_clear_output_table_pull();
+    }
+    
+    // Get the allowed size for the next batch
+    size_t thisBatchSize = p_batch_size_pull();
+    
+    size_t count = 0;
+    TableTuple& outputTuple = m_state->m_outputTable->tempTuple();
+    while (count < thisBatchSize)
     {
         if (m_lookupType == INDEX_LOOKUP_TYPE_EQ) {
             m_tuple = m_index->nextValueAtKey();
@@ -577,7 +607,7 @@ TableTuple IndexScanExecutor::p_next_pull() {
 
         if (m_tuple.isNullTuple()) {
             m_state->m_done = true;
-            return m_tuple;
+            break;
         }
 
         VOLT_TRACE("LOOPING in indexscan: tuple: '%s'\n", m_tuple.debug("tablename").c_str());
@@ -588,20 +618,32 @@ TableTuple IndexScanExecutor::p_next_pull() {
             m_state->m_endExpression->eval(m_state->m_firstTuple, m_state->m_secondTuple).isFalse())
         {
             VOLT_TRACE("End Expression evaluated to false, stopping scan");
-            m_tuple = TableTuple(m_state->m_targetTableSchema);
             break;
         }
         //
         // Then apply our post-predicate to do further filtering
         //
-        if (m_state->m_postExpression != NULL &&
-            m_state->m_postExpression->eval(m_state->m_firstTuple, m_state->m_secondTuple).isFalse())
+        if (m_state->m_postExpression == NULL ||
+            m_state->m_postExpression->eval(m_state->m_firstTuple, m_state->m_secondTuple).isTrue())
         {
-            continue;
+            // Insert the tuple into our output table
+            if (m_state->m_useTargetSchema) {
+                // Insert the tuple into our output table
+                p_insert_output_table_pull(m_tuple);
+            } else {
+                outputTuple.setNValue(0,
+                    ValueFactory::getAddressValue(m_tuple.address()));
+                // Insert the tuple into our output table
+                p_insert_output_table_pull(outputTuple);
+            }
+            ++count;
         }
-        break;
     }
-    return m_tuple;
+    // set the actual batch size
+    batchSize = count;
+    // reset the output iterator
+    m_outputTable->iterator();
+    return m_state->m_outputIterator;
 }
 
 
@@ -674,7 +716,8 @@ void IndexScanExecutor::set_expressions_pull(const NValueArray &params)
             m_searchKeyBeforeSubstituteArray[ctr]->substitute(params);
         }
     }
-    m_state.reset(new detail::IndexScanExecutorState(m_targetTable->schema(), end_expression, post_expression));
+    m_state.reset(new detail::IndexScanExecutorState(
+        m_targetTable->schema(), end_expression, post_expression, m_outputTable));
 }
 
 //@TODO
@@ -754,3 +797,9 @@ void IndexScanExecutor::set_search_key_pull(const TableTuple* otherTuple)
         m_index->moveToEnd(localSortDirection == SORT_DIRECTION_TYPE_ASC);
     }
 }
+void IndexScanExecutor::p_reset_state_pull() {
+    p_clear_output_table_pull();
+    m_state->m_outputIterator = m_outputTable->iterator();
+}
+
+

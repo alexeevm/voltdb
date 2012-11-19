@@ -101,10 +101,14 @@ class AbstractExecutor {
     void clear_output_tables_pull();
     
     /**
-     * @TODO need something better than this.
-     * Only required by aggregate executor in case of INSERT
+     * Sets flag to clean or not the output table between next_pull calls
+      */
+    void set_output_table_clear_pull(bool need_clean);
+    
+    /**
+     * Returnss flag to clean or not the output table between next_pull calls
      */
-    virtual bool parent_send_need_save_tuple_pull() const;
+    bool get_output_table_clear_pull();
 
     /**
      * Returns true if the output table for the plannode must be cleaned up
@@ -164,7 +168,7 @@ class AbstractExecutor {
      * results in an output table for the defaulted implementation of p_next_pull to find.
      * Last minute init before the p_next_pull iteration 
      */
-    virtual void p_pre_execute_pull(const NValueArray& params);
+    virtual void p_pre_execute_pull(const NValueArray& params) = 0;
 
     /** Executor specific logic */
     virtual void p_execute_pull();
@@ -203,6 +207,10 @@ class AbstractExecutor {
     // cache to avoid runtime virtual function call
     bool needs_outputtable_clear_cached;
 
+    // Clear output table between pulls. The default is false. Only immediate
+    // child of the send executor must have it set to true because send executor
+    // does not save tuples.
+    bool m_needs_output_table_clear_pull;
 };
 
 inline bool AbstractExecutor::execute(const NValueArray& params)
@@ -219,6 +227,14 @@ inline bool AbstractExecutor::execute(const NValueArray& params)
 
     // run the executor
     return p_execute(params);
+}
+
+inline void AbstractExecutor::set_output_table_clear_pull(bool needs_clean) {
+    m_needs_output_table_clear_pull = needs_clean;
+}
+
+inline bool AbstractExecutor::get_output_table_clear_pull() {
+    return m_needs_output_table_clear_pull;
 }
 
 inline TableIterator& AbstractExecutor::next_pull(size_t& batchSize)
@@ -272,11 +288,12 @@ typename Functor::result_type AbstractExecutor::depth_first_iterate_pull(
 }
 
 inline void AbstractExecutor::p_insert_output_table_pull(TableTuple& tuple) {
-    assert(m_tmpOutputTable);
-    if (!m_tmpOutputTable->insertTuple(tuple)) {
+    Table* outputTable = this->getPlanNode()->getOutputTable();
+    assert(outputTable);
+    if (!outputTable->insertTuple(tuple)) {
         char message[128];
         snprintf(message, 128, "Failed to insert into output table '%s'",
-                m_tmpOutputTable->name().c_str());
+                outputTable->name().c_str());
         VOLT_ERROR("%s", message);
         throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
                                       message);
@@ -299,6 +316,7 @@ inline bool AbstractExecutor::support_pull() const {
 }
 
 inline void AbstractExecutor::p_reset_state_pull() {
+    clear_output_table_pull();
 }
 
 inline void AbstractExecutor::clear_output_tables_pull()
@@ -307,19 +325,11 @@ inline void AbstractExecutor::clear_output_tables_pull()
     depth_first_iterate_pull(fcleanup, false);
 }
 
-inline bool AbstractExecutor::parent_send_need_save_tuple_pull() const
-{
-    return true;
-}
-
-inline size_t AbstractExecutor::p_batch_size_pull() const {
-    //@TODO
-    return 10;
-}
-
 inline void AbstractExecutor::p_clear_output_table_pull() {
-        // @TODO Free allocated String ?
-        m_tmpOutputTable->deleteAllTuples(false);
+    // @TODO Free allocated String ?
+    Table* output_table = getPlanNode()->getOutputTable();
+    assert(output_table);
+    output_table->deleteAllTuples(false);
 }
 
 }

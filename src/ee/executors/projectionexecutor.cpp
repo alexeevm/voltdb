@@ -63,10 +63,14 @@ struct ProjectionExecutorState
 {
     ProjectionExecutorState(AbstractExecutor* childExec, TempTable* output_table) :
         m_childExecutor(childExec),
+        m_outputTable(output_table),
+        m_outputIterator(output_table->iterator()),
         m_tempTuple(output_table->tempTuple())
     {}
 
     AbstractExecutor* m_childExecutor;
+    TempTable* m_outputTable;
+    TableIterator& m_outputIterator;
     TableTuple& m_tempTuple;
 };
 
@@ -204,15 +208,24 @@ ProjectionExecutor::~ProjectionExecutor() {
 
 TableIterator& ProjectionExecutor::p_next_pull(size_t& batchSize)
 {
-    // Prepare the output table
-    p_clear_output_table_pull();
+    if (m_state->m_outputIterator.hasNext()) {
+        batchSize = m_state->m_outputTable->activeTupleCount() - m_state->m_outputIterator.getLocation();
+        return m_state->m_outputIterator;
+    }
     
+    // Prepare the output table
+    if (!get_output_table_clear_pull()) {
+        p_clear_output_table_pull();
+    }
+
     TableIterator& tupleIt = m_state->m_childExecutor->next_pull(batchSize);
     if (!tupleIt.hasNext() || batchSize == 0) {
         return tupleIt;
     }
-
-    for (size_t i = 0; tupleIt.next(tuple) && i < batchSize; ++i) {
+    
+    batchSize = std::min(batchSize, p_batch_size_pull());
+    size_t i = 0;
+    for (; i < batchSize && tupleIt.next(tuple); ++i) {
         //
         // Project (or replace) values from input tuple only if values
         // are not all ParameterValueExpression ones. If they are, temp_tuple
@@ -229,7 +242,10 @@ TableIterator& ProjectionExecutor::p_next_pull(size_t& batchSize)
         }
         p_insert_output_table_pull(m_state->m_tempTuple);
     }
-    return output_table->iterator();
+    batchSize = m_state->m_outputTable->activeTupleCount();
+    // reset the iterator
+    m_state->m_outputTable->iterator();
+    return m_state->m_outputIterator;
 }
 
 void  ProjectionExecutor::p_pre_execute_pull(const NValueArray &params) {
