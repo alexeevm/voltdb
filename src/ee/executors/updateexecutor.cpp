@@ -267,6 +267,7 @@ void UpdateExecutor::p_pre_execute_pull(const NValueArray &params)
     std::vector<AbstractPlanNode*>& children = m_node->getChildren();
     assert(children.size() == 1);
     AbstractExecutor* childExec = children[0]->getExecutor();
+    childExec->set_output_table_clear_pull(true);
 
     TempTable* outputTable = dynamic_cast<TempTable*>(m_node->getOutputTable());
     assert(outputTable);
@@ -280,67 +281,73 @@ TableIterator& UpdateExecutor::p_next_pull(size_t& batchSize) {
             p_clear_output_table_pull();
         }
     } else {
-        while (true) {
-            TableIterator& inputIt = m_state->m_childExecutor->next_pull(batchSize);
-            if (!inputIt.hasNext() || batchSize == 0) {
+        // iteration stops when next_pull returns an empty iterator
+        while (true)
+        {
+            TableIterator& it = m_state->m_childExecutor->next_pull(batchSize);
+            if (!it.hasNext() || batchSize == 0) {
                 break;
             }
-            size_t count = 0;
-            for (;count < batchSize && inputIt.next(m_inputTuple); ++count) {
-                //
-                // OPTIMIZATION: Single-Sited Query Plans
-                // If our beloved UpdatePlanNode is apart of a single-site query plan,
-                // then the first column in the input table will be the address of a
-                // tuple on the target table that we will want to update. This saves us
-                // the trouble of having to do an index lookup
-                //
-                void *target_address = m_inputTuple.getNValue(0).castAsAddress();
-                m_targetTuple.move(target_address);
+            // @TODO Skip returned tuples.
+            it.setDone();
+        }
+            
+        TableIterator inputIt = m_inputTable->iterator();
+        while (inputIt.next(m_inputTuple)) {
+            //
+            // OPTIMIZATION: Single-Sited Query Plans
+            // If our beloved UpdatePlanNode is apart of a single-site query plan,
+            // then the first column in the input table will be the address of a
+            // tuple on the target table that we will want to update. This saves us
+            // the trouble of having to do an index lookup
+            //
+            void *target_address = m_inputTuple.getNValue(0).castAsAddress();
+            m_targetTuple.move(target_address);
 
-                // Loop through INPUT_COL_IDX->TARGET_COL_IDX mapping and only update
-                // the values that we need to. The key thing to note here is that we
-                // grab a temp tuple that is a copy of the target tuple (i.e., the tuple
-                // we want to update). This insures that if the input tuple is somehow
-                // bringing garbage with it, we're only going to copy what we really
-                // need to into the target tuple.
-                //
-                TableTuple &tempTuple = m_targetTable->getTempTupleInlined(m_targetTuple);
-                for (int map_ctr = 0; map_ctr < m_inputTargetMapSize; map_ctr++) {
-                    tempTuple.setNValue(m_inputTargetMap[map_ctr].second,
-                                        m_inputTuple.getNValue(m_inputTargetMap[map_ctr].first));
-                }
-                
-                // if there is a partition column for the target table
-                if (m_partitionColumn != -1) {
-                    // check for partition problems
-                    // get the value for the partition column
-                    NValue value = tempTuple.getNValue(m_partitionColumn);
-                    bool isLocal = m_engine->isLocalSite(value);
+            // Loop through INPUT_COL_IDX->TARGET_COL_IDX mapping and only update
+            // the values that we need to. The key thing to note here is that we
+            // grab a temp tuple that is a copy of the target tuple (i.e., the tuple
+            // we want to update). This insures that if the input tuple is somehow
+            // bringing garbage with it, we're only going to copy what we really
+            // need to into the target tuple.
+            //
+            TableTuple &tempTuple = m_targetTable->getTempTupleInlined(m_targetTuple);
+            for (int map_ctr = 0; map_ctr < m_inputTargetMapSize; map_ctr++) {
+                tempTuple.setNValue(m_inputTargetMap[map_ctr].second,
+                                    m_inputTuple.getNValue(m_inputTargetMap[map_ctr].first));
+            }
 
-                    // if it doesn't map to this site
-                    if (!isLocal) {
-                        char message[128];
-                        snprintf(message, 128, "Mispartitioned tuple in single-partition plan for"
-                                       " table '%s'", m_targetTable->name().c_str());
-                        VOLT_INFO(message);
-                        throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
-                    }
-                }
-std::cout << "New = " << tempTuple.debug("NEW") << '\n';
-std::cout << "OLD = " << m_targetTuple.debug("OLD") << '\n';
-                
-                if (!m_targetTable->updateTuple(tempTuple, m_targetTuple,
-                                                m_updatesIndexes)) {
+            // if there is a partition column for the target table
+            if (m_partitionColumn != -1) {
+                // check for partition problems
+                // get the value for the partition column
+                NValue value = tempTuple.getNValue(m_partitionColumn);
+                bool isLocal = m_engine->isLocalSite(value);
+
+                // if it doesn't map to this site
+                if (!isLocal) {
                     char message[128];
-                    snprintf(message, 128, "Failed to update tuple from table '%s'",
-                          m_targetTable->name().c_str());
+                    snprintf(message, 128, "Mispartitioned tuple in single-partition plan for"
+                                   " table '%s'", m_targetTable->name().c_str());
                     VOLT_INFO(message);
                     throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
                 }
-                
             }
-            m_state->m_modifiedTuples += count;
+std::cout << "New = " << tempTuple.debug("NEW") << '\n';
+std::cout << "OLD = " << m_targetTuple.debug(m_targetTable->name()) << '\n';
+
+            if (!m_targetTable->updateTuple(tempTuple, m_targetTuple,
+                                            m_updatesIndexes)) {
+                char message[128];
+                snprintf(message, 128, "Failed to update tuple from table '%s'",
+                      m_targetTable->name().c_str());
+                VOLT_INFO(message);
+                throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, message);
+            }
+                
         }
+        m_state->m_modifiedTuples += m_inputTable->activeTupleCount();
+
         m_state->m_done = true;
         TableTuple& count_tuple = m_state->m_outputTable->tempTuple();
         count_tuple.setNValue(0, ValueFactory::getBigIntValue(m_state->m_modifiedTuples));

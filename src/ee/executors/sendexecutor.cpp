@@ -137,7 +137,6 @@ void SendExecutor::p_execute_pull() {
     assert(m_inputTable);
 
     // iteration stops when next_pull returns an empty iterator
-    TableTuple temp(m_inputTable->schema());
     while (true)
     {
         size_t batchSize = 0;

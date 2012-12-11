@@ -379,12 +379,12 @@ namespace detail
     {
         AggregateExecutorState(Table* outputTable) :
            m_outputTable(outputTable),
-           m_iterator(outputTable->iterator()),
+           m_outputIterator(outputTable->iterator()),
            m_outputTableSchema(outputTable->schema())
         {}
 
         Table* m_outputTable;
-        TableIterator m_iterator;
+        TableIterator& m_outputIterator;
         const TupleSchema* m_outputTableSchema;
     };
 
@@ -409,17 +409,12 @@ public:
     { };
     ~AggregateExecutor();
 
-    bool support_pull() const;
-    /** Aggregates save tuples in the output table
-     so parent SendExecutor must not save them again*/
-    bool parent_send_need_save_tuple_pull() const;
-
 protected:
     bool p_init(AbstractPlanNode* abstract_node,
                 TempTableLimits* limits);
     bool p_execute(const NValueArray &params);
 
-    TableTuple p_next_pull();
+    TableIterator&  p_next_pull(size_t& batchSize);
     void p_pre_execute_pull(const NValueArray& params);
     void p_post_execute_pull();
     void p_reset_state_pull();
@@ -982,33 +977,10 @@ AggregateExecutor<aggregateType>::~AggregateExecutor()
 
 template<PlanNodeType aggregateType>
 inline
-bool AggregateExecutor<aggregateType>::support_pull() const
+TableIterator&  AggregateExecutor<aggregateType>::p_next_pull(size_t& batchSize)
 {
-    return true;
-}
-
-template<PlanNodeType aggregateType>
-inline
-bool AggregateExecutor<aggregateType>::parent_send_need_save_tuple_pull() const
-{
-    return false;
-}
-
-
-
-template<PlanNodeType aggregateType>
-inline
-TableTuple AggregateExecutor<aggregateType>::p_next_pull()
-{
-    TableTuple tuple(m_state->m_outputTableSchema);
-    if (m_state->m_iterator.next(tuple))
-    {
-        return tuple;
-    }
-    else
-    {
-        return TableTuple (m_state->m_outputTableSchema);
-    }
+    batchSize = m_state->m_outputTable->activeTupleCount() - m_state->m_outputIterator.getLocation();
+    return m_state->m_outputIterator;
 }
 
 template<PlanNodeType aggregateType>
@@ -1040,7 +1012,6 @@ void AggregateExecutor<aggregateType>::p_pre_execute_pull(const NValueArray& par
         node->getDistinctAggregates();
     std::vector<AbstractExpression*> groupByExpressions =
         node->getGroupByExpressions();
-    TableTuple prev(input_table->schema());
 
     Aggregator<aggregateType> aggregator(&m_memoryPool, m_groupByKeySchema,
                                          node, &m_passThroughColumns,
@@ -1049,19 +1020,26 @@ void AggregateExecutor<aggregateType>::p_pre_execute_pull(const NValueArray& par
                                          groupByExpressions, &col_types);
 
     VOLT_TRACE("looping..");
+    
+    size_t batchSize = p_batch_size_pull();
+    size_t count = 0;
+    TableTuple cur(input_table->schema());
+    TableTuple prev(input_table->schema());
     while (true)
     {
-        TableTuple cur = child_executor->next_pull();
-        if (cur.isNullTuple())
+        TableIterator& tupleIt = child_executor->next_pull(batchSize);
+        if (!tupleIt.hasNext() || batchSize == 0)
         {
             break;
         }
-        if (!aggregator.nextTuple( cur, prev))
-        {
-            throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
-                                          "Aggregator failed to process tuple");
+        while (count < batchSize && tupleIt.next(cur)) {
+            if (!aggregator.nextTuple( cur, prev))
+            {
+                throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
+                                              "Aggregator failed to process tuple");
+            }
+            prev.move(cur.address());
         }
-        prev.move(cur.address());
     }
     VOLT_TRACE("finalizing..");
     if (!aggregator.finalize(prev))
@@ -1085,7 +1063,8 @@ template<PlanNodeType aggregateType>
 inline
 void AggregateExecutor<aggregateType>::p_reset_state_pull()
 {
-    m_state->m_iterator = m_state->m_outputTable->iterator();
+    clear_output_table_pull();
+    m_state->m_outputTable->iterator();
 }
 
 }

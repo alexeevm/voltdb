@@ -240,6 +240,7 @@ TableIterator& ProjectionExecutor::p_next_pull(size_t& batchSize)
                 m_state->m_tempTuple.setNValue(ctr, expression_array[ctr]->eval(&tuple, NULL));
             }
         }
+std::cout << "Proj = " << m_state->m_tempTuple.debug("PROJ") << '\n';
         p_insert_output_table_pull(m_state->m_tempTuple);
     }
     batchSize = m_state->m_outputTable->activeTupleCount();

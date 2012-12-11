@@ -83,6 +83,13 @@ public:
     bool next(TableTuple &out);
     bool hasNext();
     int getLocation() const;
+    
+    /**
+     * Makes sure that after this method is called the subsequent invocation
+     * the next/hasNext methods return false. Essentially, this is a hack.
+     * 
+    */
+    void setDone();
 
 private:
     // Get an iterator via table->iterator()
@@ -185,6 +192,10 @@ inline bool TableIterator::next(TableTuple &out) {
     else {
         return tempNext(out);
     }
+}
+
+inline void TableIterator::setDone() {
+    m_foundTuples = m_activeTuples;
 }
 
 inline bool TableIterator::persistentNext(TableTuple &out) {
