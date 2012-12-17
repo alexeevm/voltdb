@@ -226,7 +226,7 @@ final class RangeVariable {
     public int findColumn(String columnName) {
 
         if (namedJoinColumnExpressions != null
-                && namedJoinColumnExpressions.containsKey(columnName)) {
+                && !namedJoinColumnExpressions.containsKey(columnName)) {
             return -1;
         }
 
@@ -348,10 +348,17 @@ final class RangeVariable {
                         exprList.remove(i);
                         exprList.add(position, e);
                     }
+                    ExpressionColumn ce = getColumnExpression(columnName);
+                    // If column expression doesn't have table name set reuse table name from
+                    // the original expression
+                    String t = ce.getTableName();
+                    if (ce != null && (ce.getTableName() == null || ce.getTableName().length() == 0)) {
+                        if (e instanceof ExpressionColumn) {
+                            ce.tableName = ((ExpressionColumn) e).getTableName();
+                        }
+                    }
 
-                    e = getColumnExpression(columnName);
-
-                    exprList.set(position, e);
+                    exprList.set(position, ce);
 
                     position++;
                 }
