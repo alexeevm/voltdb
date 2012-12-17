@@ -857,9 +857,6 @@ public class ExpressionColumn extends Expression {
             exp.name = "columnref";
             if (tableName != null)
                 exp.attributes.put("table", tableName);
-            else {
-                int a = 0;
-            }
             exp.attributes.put("column", columnName);
             exp.attributes.put("alias", (this.alias != null) && (getAlias().length() > 0) ? getAlias() : columnName);
         }
