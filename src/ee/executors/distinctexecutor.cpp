@@ -132,7 +132,6 @@ bool DistinctExecutor::p_execute(const NValueArray &params) {
                 return false;
             }
         }
-    else
     }
 
     return true;
