@@ -1134,7 +1134,9 @@ final class RangeVariable {
 
 
     /*************** VOLTDB *********************/
-
+    // Reference to a range variable representing table this table is joined with.
+    RangeVariable joinedWith = null;
+    
     /**
      * VoltDB added method to get a non-catalog-dependent
      * representation of this HSQLDB object.
@@ -1186,8 +1188,16 @@ final class RangeVariable {
         }
 
         // note if this is an outer join
-        if (isLeftJoin || isRightJoin) {
-            scan.attributes.put("isouterjoin", "true");
+        if (isLeftJoin && isRightJoin) {
+            scan.attributes.put("jointype", "full");
+        } else if (isLeftJoin) {
+            scan.attributes.put("jointype", "left");
+        } else if (isRightJoin) {
+            scan.attributes.put("jointype", "right");
+        }
+        
+        if (joinedWith != null) {
+            scan.attributes.put("joinedwith", joinedWith.rangeTable.getName().name);
         }
 
         // start with the indexCondition

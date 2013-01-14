@@ -27,7 +27,9 @@ import org.voltdb.catalog.Database;
 import org.voltdb.catalog.Table;
 import org.voltdb.expressions.AbstractExpression;
 import org.voltdb.expressions.ExpressionUtil;
+import org.voltdb.plannodes.AbstractJoinPlanNode;
 import org.voltdb.plannodes.AbstractPlanNode;
+import org.voltdb.plannodes.AbstractScanPlanNode;
 import org.voltdb.plannodes.IndexScanPlanNode;
 import org.voltdb.plannodes.NestLoopIndexPlanNode;
 import org.voltdb.plannodes.NestLoopPlanNode;
@@ -248,7 +250,10 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
         for (AccessPath[] accessPath : listOfAccessPathCombos) {
             // get a plan
             AbstractPlanNode scanPlan = getSelectSubPlanForAccessPath(joinOrder, accessPath, deferSendReceivePair);
-            m_plans.add(scanPlan);
+            // Validate join order against existing join relationships
+            if (scanPlan != null && validateJoinOrder(scanPlan) == true) {
+                m_plans.add(scanPlan);
+            }
         }
     }
 
@@ -256,6 +261,7 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
      * Given a specific join order and access path set for that join order, construct the plan
      * that gives the right tuples. This method is the meat of sub-plan-graph generation, but all
      * of the smarts are probably done by now, so this is just boring actual construction.
+     * If a given join order can't satisfy left/right joins the NULL access path is returned.
      *
      * @param joinOrder An array of tables in a specific join order.
      * @param accessPath An array of access paths that match with the input tables.
@@ -267,11 +273,13 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
 
         // do the actual work
         AbstractPlanNode retv = getSelectSubPlanForAccessPathsIterative(joinOrder, accessPath, deferSendReceivePair);
-        // If there is a multi-partition statement on one or more partitioned Tables
-        // and the pre-join Send/Receive nodes were suppressed,
-        // they need to come into play "post-join".
-        if (deferSendReceivePair && m_partitioning.requiresTwoFragments()) {
-            retv = addSendReceivePair(retv);
+        if (retv != null) {
+            // If there is a multi-partition statement on one or more partitioned Tables
+            // and the pre-join Send/Receive nodes were suppressed,
+            // they need to come into play "post-join".
+            if (deferSendReceivePair && m_partitioning.requiresTwoFragments()) {
+                retv = addSendReceivePair(retv);
+            }
         }
         return retv;
     }
@@ -295,6 +303,15 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
         for (int at = joinOrder.length-1; at >= 0; --at) {
             AbstractPlanNode scanPlan = getAccessPlanForTable(joinOrder[at], accessPath[at]);
             if (resultPlan == null) {
+                // This is the last node in the access path.
+                assert(scanPlan instanceof AbstractScanPlanNode);
+                AbstractScanPlanNode absScanPlan = (AbstractScanPlanNode) scanPlan;
+                String tableName = absScanPlan.getTargetTableName();
+                AbstractParsedStmt.JoinInfo joinInfo = this.m_parsedStmt.joinList.get(tableName);
+                // The last table in the join order always goes to the right. The join type can't be RIGHT
+                if (joinInfo.jointType == JoinType.RIGHT) {
+                    return null;
+                }
                 resultPlan = scanPlan;
             } else {
                 /*
@@ -303,6 +320,9 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
                  * ScanPlanNode for them to work on.
                  */
                 resultPlan = getSelectSubPlanForAccessPathStep(accessPath[at], resultPlan, scanPlan);
+                if (resultPlan == null) {
+                    return resultPlan;
+                }
             }
             /*
              * If the access plan for the table in the join order was for a
@@ -318,11 +338,40 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
 
     private AbstractPlanNode getSelectSubPlanForAccessPathStep(AccessPath accessPath, AbstractPlanNode subPlan, AbstractPlanNode nljAccessPlan) {
 
+        assert(nljAccessPlan instanceof AbstractScanPlanNode);
+        AbstractScanPlanNode absScanPlan = (AbstractScanPlanNode) nljAccessPlan;
+        String tableName = absScanPlan.getTargetTableName();
+        AbstractParsedStmt.JoinInfo joinInfo = this.m_parsedStmt.joinList.get(tableName);
+        JoinType nodeJoinType = (joinInfo.jointType == JoinType.INVALID) ?
+            JoinType.INNER : joinInfo.jointType;
+        
+        JoinType subPlanJoinType = JoinType.INVALID;
+        if (subPlan instanceof AbstractScanPlanNode) {
+            String otherTableName = ((AbstractScanPlanNode) subPlan).getTargetTableName();
+            
+            AbstractParsedStmt.JoinInfo otherJoinInfo = this.m_parsedStmt.joinList.get(otherTableName);
+            subPlanJoinType = (otherJoinInfo.jointType == JoinType.INVALID) ?
+                JoinType.INNER : otherJoinInfo.jointType;
+        } else if (subPlan instanceof AbstractJoinPlanNode) {
+            subPlanJoinType = ((AbstractJoinPlanNode) subPlan).getJoinType();
+        }
+        assert(subPlanJoinType != JoinType.INVALID);
+
+        // The join types for the subPlan and new node can't be the same unless both of them are INNER
+        if ((nodeJoinType == subPlanJoinType) || (nodeJoinType != JoinType.INNER)) {
+            return null;
+        }
         // get all the clauses that join the applicable two tables
         ArrayList<AbstractExpression> joinClauses = accessPath.joinExprs;
 
         AbstractPlanNode retval = null;
         if (nljAccessPlan instanceof IndexScanPlanNode) {
+            if (nodeJoinType == JoinType.RIGHT || subPlanJoinType == JoinType.LEFT) {
+                // Index scan executor expect index scan node to be the inner(inlined) one
+                // At least for now
+                return null;
+            }
+            
             NestLoopIndexPlanNode nlijNode = new NestLoopIndexPlanNode();
 
             nlijNode.setJoinType(JoinType.INNER);
@@ -334,19 +383,47 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
 
             // combine the tails plan graph with the new head node
             nlijNode.addAndLinkChild(subPlan);
+
+            // set join type. here we only care whether it's OUTER or INNER join
+            // the index scan is always an inner table anyway (for now)
+            if (nodeJoinType != JoinType.INNER) {
+                nlijNode.setJoinType(nodeJoinType);
+            } else {
+                nlijNode.setJoinType(subPlanJoinType);
+            }
+
             // now generate the output schema for this join
             nlijNode.generateOutputSchema(m_db);
 
             retval = nlijNode;
         }
         else {
+            if (nodeJoinType == JoinType.LEFT && subPlan instanceof AbstractScanPlanNode) {
+                // Since both nodes are scan nodes the order is set:
+                // nljAccessPlan is the outer table and the subPlan is the inner one
+                // The access path is invalid
+                // The reverse order will be generated anyway
+                return null;
+            }
+            
             NestLoopPlanNode nljNode = new NestLoopPlanNode();
             if ((joinClauses != null) && (joinClauses.size() > 0))
                 nljNode.setPredicate(ExpressionUtil.combine(joinClauses));
             nljNode.setJoinType(JoinType.LEFT);
 
             // combine the tails plan graph with the new head node
-            nljNode.addAndLinkChild(nljAccessPlan);
+            if (nodeJoinType == JoinType.LEFT) {
+                nljNode.addAndLinkChild(subPlan);
+                nljNode.addAndLinkChild(nljAccessPlan);
+            } else {
+                nljNode.addAndLinkChild(nljAccessPlan);
+                nljNode.addAndLinkChild(subPlan);
+            }
+            if (nodeJoinType != JoinType.INNER) {
+                nljNode.setJoinType(nodeJoinType);
+            } else {
+                nljNode.setJoinType(subPlanJoinType);
+            }
 
             nljNode.addAndLinkChild(subPlan);
             // now generate the output schema for this join
@@ -440,6 +517,18 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
         }
 
         return retval;
+    }
+    
+    /**
+     * Given a join order, compute a list of all combinations of access paths. This will return a list
+     * of sets of specific ways to access each table in a join order. It is called recursively.
+     *
+     * @param accessPlan Generated Access Plan to validate.
+     * @return true if the access plan satisfies all the join relationships, flase otherwise
+     */
+    private boolean validateJoinOrder(AbstractPlanNode accessPlan){
+        assert(false);
+        return false;
     }
 
 }

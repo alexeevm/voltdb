@@ -852,9 +852,9 @@ public class ParserDQL extends ParserBase {
     void XreadTableReference(QuerySpecification select) {
 
         boolean       natural = false;
-        RangeVariable range   = readTableOrSubquery();
+        RangeVariable range1   = readTableOrSubquery();
 
-        select.addRangeVariable(range);
+        select.addRangeVariable(range1);
 
         while (true) {
             int     type  = token.tokenType;
@@ -964,22 +964,23 @@ public class ParserDQL extends ParserBase {
                 break;
             }
 
-            range = readTableOrSubquery();
+            RangeVariable range2 = readTableOrSubquery();
+            range2.joinedWith = range1;
 
             Expression condition = null;
 
             switch (type) {
 
                 case Tokens.CROSS :
-                    select.addRangeVariable(range);
+                    select.addRangeVariable(range2);
                     break;
 
                 case Tokens.UNION :
-                    select.addRangeVariable(range);
+                    select.addRangeVariable(range2);
 
                     condition = Expression.EXPR_FALSE;
 
-                    range.setJoinType(true, true);
+                    range2.setJoinType(true, true);
                     break;
 
                 case Tokens.LEFT :
@@ -988,31 +989,31 @@ public class ParserDQL extends ParserBase {
                 case Tokens.FULL : {
                     if (natural) {
                         OrderedHashSet columns =
-                            range.getUniqueColumnNameSet();
+                            range2.getUniqueColumnNameSet();
 
                         condition = select.getEquiJoinExpressions(columns,
-                                range, false);
+                                range2, false);
 
-                        select.addRangeVariable(range);
+                        select.addRangeVariable(range2);
                     } else if (token.tokenType == Tokens.USING) {
                         read();
 
                         OrderedHashSet columns = new OrderedHashSet();
 
                         readThis(Tokens.OPENBRACKET);
-                        readSimpleColumnNames(columns, range);
+                        readSimpleColumnNames(columns, range2);
                         readThis(Tokens.CLOSEBRACKET);
 
                         condition = select.getEquiJoinExpressions(columns,
-                                range, true);
+                                range2, true);
 
-                        select.addRangeVariable(range);
+                        select.addRangeVariable(range2);
                     } else if (token.tokenType == Tokens.ON) {
                         read();
 
                         condition = XreadBooleanValueExpression();
 
-                        select.addRangeVariable(range);
+                        select.addRangeVariable(range2);
 
                         // must ensure references are limited to the current table
 //                        select.finaliseRangeVariables();
@@ -1021,13 +1022,13 @@ public class ParserDQL extends ParserBase {
                         throw Error.error(ErrorCode.X_42581);
                     }
 
-                    range.setJoinType(left, right);
+                    range2.setJoinType(left, right);
 
                     break;
                 }
             }
 
-            range.addJoinCondition(condition);
+            range2.addJoinCondition(condition);
 
             natural = false;
         }

@@ -38,6 +38,7 @@ import org.voltdb.expressions.ParameterValueExpression;
 import org.voltdb.expressions.TupleValueExpression;
 import org.voltdb.plannodes.SchemaColumn;
 import org.voltdb.types.ExpressionType;
+import org.voltdb.types.JoinType;
 
 public abstract class AbstractParsedStmt {
 
@@ -62,6 +63,18 @@ public abstract class AbstractParsedStmt {
             return t1.hashCode() ^ t2.hashCode();
         }
     }
+    
+    public class JoinInfo {
+        public JoinInfo(String joinedWithTable, JoinType jointType) {
+            this.joinedWithTable = joinedWithTable;
+            this.jointType = jointType;
+        }
+
+        public String thisTable;
+        public String joinedWithTable;
+
+        JoinType jointType;
+    }
 
 
     public String sql;
@@ -85,6 +98,8 @@ public abstract class AbstractParsedStmt {
     public HashMap<TablePair, ArrayList<AbstractExpression>> joinSelectionList = new HashMap<TablePair, ArrayList<AbstractExpression>>();
 
     public HashMap<AbstractExpression, Set<AbstractExpression> > valueEquivalence = new HashMap<AbstractExpression, Set<AbstractExpression>>();
+
+    public HashMap<String, JoinInfo> joinList = new HashMap<String, JoinInfo>();
 
     //User specified join order, null if none is specified
     public String joinOrder = null;
@@ -533,6 +548,13 @@ public abstract class AbstractParsedStmt {
 
                 visited.add(table);
                 tableList.add(table);
+                
+                String joinedWithTable = node.attributes.get("joinedwith");
+                if (joinedWithTable != null) {
+                    JoinType joinType = JoinType.get(node.attributes.get("jointype"));
+                    // Self-joins are not allowed now. table name is unique
+                    joinList.put(tableName, new JoinInfo(joinedWithTable, joinType));
+                }
             }
         }
     }
