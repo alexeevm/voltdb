@@ -107,6 +107,11 @@ public class QueryPlanner {
         m_cluster = catalogCluster;
         m_partitioning = partitioning;
         m_estimates = estimates;
+        m_quietPlanner = suppressDebugOutput;
+        //m_fullDebug = System.getProperties().contains("compilerdebug");
+        //m_quietPlanner = suppressDebugOutput;
+        m_fullDebug = true;
+        m_quietPlanner = false;
         m_partitioning = partitioning;
         m_maxTablesPerJoin = maxTablesPerJoin;
         m_costModel = costModel;

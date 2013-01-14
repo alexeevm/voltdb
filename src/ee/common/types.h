@@ -124,6 +124,7 @@ enum JoinType {
     JOIN_TYPE_LEFT          = 2,
     JOIN_TYPE_FULL          = 3,
     JOIN_TYPE_RIGHT         = 4,
+    JOIN_TYPE_OUTER         = 5
 };
 
 // ------------------------------------------------------------------

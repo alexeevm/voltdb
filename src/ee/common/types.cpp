@@ -260,6 +260,9 @@ string joinToString(JoinType type)
     case JOIN_TYPE_RIGHT: {
         return "RIGHT";
     }
+    case JOIN_TYPE_OUTER: {
+        return "OUTER";
+    }
     }
     return "INVALID";
 }
@@ -276,6 +279,8 @@ JoinType stringToJoin(string str )
         return JOIN_TYPE_FULL;
     } else if (str == "RIGHT") {
         return JOIN_TYPE_RIGHT;
+    } else if (str == "OUTER") {
+        return JOIN_TYPE_OUTER;
     }
     return JOIN_TYPE_INVALID;
 }
