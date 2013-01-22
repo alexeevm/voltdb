@@ -852,10 +852,12 @@ public class ParserDQL extends ParserBase {
     void XreadTableReference(QuerySpecification select) {
 
         boolean       natural = false;
-        RangeVariable range1   = readTableOrSubquery();
+        int joinDistance = 0;
+        RangeVariable range   = readTableOrSubquery();
 
-        select.addRangeVariable(range1);
+        select.addRangeVariable(range);
 
+        RangeVariable joinedWithRange = range;
         while (true) {
             int     type  = token.tokenType;
             boolean left  = false;
@@ -964,23 +966,29 @@ public class ParserDQL extends ParserBase {
                 break;
             }
 
-            RangeVariable range2 = readTableOrSubquery();
-            range2.joinedWith = range1;
+            range = readTableOrSubquery();
+            if (type != Tokens.CROSS) {
+                range.joinedWith = joinedWithRange;
+                range.joinDistance = joinDistance++;
+            } else {
+                joinedWithRange = range;
+                joinDistance = 0;
+            }
 
             Expression condition = null;
 
             switch (type) {
 
                 case Tokens.CROSS :
-                    select.addRangeVariable(range2);
+                    select.addRangeVariable(range);
                     break;
 
                 case Tokens.UNION :
-                    select.addRangeVariable(range2);
+                    select.addRangeVariable(range);
 
                     condition = Expression.EXPR_FALSE;
 
-                    range2.setJoinType(true, true);
+                    range.setJoinType(true, true);
                     break;
 
                 case Tokens.LEFT :
@@ -989,31 +997,31 @@ public class ParserDQL extends ParserBase {
                 case Tokens.FULL : {
                     if (natural) {
                         OrderedHashSet columns =
-                            range2.getUniqueColumnNameSet();
+                            range.getUniqueColumnNameSet();
 
                         condition = select.getEquiJoinExpressions(columns,
-                                range2, false);
+                                range, false);
 
-                        select.addRangeVariable(range2);
+                        select.addRangeVariable(range);
                     } else if (token.tokenType == Tokens.USING) {
                         read();
 
                         OrderedHashSet columns = new OrderedHashSet();
 
                         readThis(Tokens.OPENBRACKET);
-                        readSimpleColumnNames(columns, range2);
+                        readSimpleColumnNames(columns, range);
                         readThis(Tokens.CLOSEBRACKET);
 
                         condition = select.getEquiJoinExpressions(columns,
-                                range2, true);
+                                range, true);
 
-                        select.addRangeVariable(range2);
+                        select.addRangeVariable(range);
                     } else if (token.tokenType == Tokens.ON) {
                         read();
 
                         condition = XreadBooleanValueExpression();
 
-                        select.addRangeVariable(range2);
+                        select.addRangeVariable(range);
 
                         // must ensure references are limited to the current table
 //                        select.finaliseRangeVariables();
@@ -1022,13 +1030,13 @@ public class ParserDQL extends ParserBase {
                         throw Error.error(ErrorCode.X_42581);
                     }
 
-                    range2.setJoinType(left, right);
+                    range.setJoinType(left, right);
 
                     break;
                 }
             }
 
-            range2.addJoinCondition(condition);
+            range.addJoinCondition(condition);
 
             natural = false;
         }

@@ -65,13 +65,15 @@ public abstract class AbstractParsedStmt {
     }
     
     public class JoinInfo {
-        public JoinInfo(String joinedWithTable, JoinType jointType) {
+        public JoinInfo(String joinedWithTable, JoinType jointType, int joinDistance) {
             this.joinedWithTable = joinedWithTable;
             this.jointType = jointType;
+            this.joinDistance = joinDistance;
         }
 
         public String thisTable;
         public String joinedWithTable;
+        public int joinDistance;
 
         JoinType jointType;
     }
@@ -99,6 +101,7 @@ public abstract class AbstractParsedStmt {
 
     public HashMap<AbstractExpression, Set<AbstractExpression> > valueEquivalence = new HashMap<AbstractExpression, Set<AbstractExpression>>();
 
+    //public HashMap<String, ArrayList<JoinInfo>> joinList = new HashMap<String, ArrayList<JoinInfo>>();
     public HashMap<String, JoinInfo> joinList = new HashMap<String, JoinInfo>();
 
     //User specified join order, null if none is specified
@@ -536,6 +539,8 @@ public abstract class AbstractParsedStmt {
 
         for (VoltXMLElement node : tablesNode.children) {
             if (node.name.equalsIgnoreCase("tablescan")) {
+                
+                System.out.println(node);
 
                 String tableName = node.attributes.get("table");
                 Table table = getTableFromDB(tableName);
@@ -552,8 +557,21 @@ public abstract class AbstractParsedStmt {
                 String joinedWithTable = node.attributes.get("joinedwith");
                 if (joinedWithTable != null) {
                     JoinType joinType = JoinType.get(node.attributes.get("jointype"));
-                    // Self-joins are not allowed now. table name is unique
-                    joinList.put(tableName, new JoinInfo(joinedWithTable, joinType));
+                    if (joinType == JoinType.FULL) {
+                        throw new PlanningErrorException("VoltDB does not yet support full joins");
+                    }
+                    String joinDistance = node.attributes.get("joindistance");
+                    assert(joinDistance != null);
+                    // VoltDB does not yet support self joins
+                    joinList.put(tableName, new JoinInfo(joinedWithTable, joinType, Integer.parseInt(joinDistance)));
+//                    if (joinList.containsValue(tableName)) {
+//                        List<JoinInfo> joins = joinList.get(tableName);
+//                        joins.add(new JoinInfo(joinedWithTable, joinType));
+//                    } else {
+//                        ArrayList<JoinInfo> joins = new ArrayList<JoinInfo>();
+//                        joins.add(new JoinInfo(joinedWithTable, joinType));
+//                        joinList.put(tableName, joins);
+//                    }
                 }
             }
         }

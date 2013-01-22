@@ -351,7 +351,6 @@ final class RangeVariable {
                     ExpressionColumn ce = getColumnExpression(columnName);
                     // If column expression doesn't have table name set reuse table name from
                     // the original expression
-                    String t = ce.getTableName();
                     if (ce != null && (ce.getTableName() == null || ce.getTableName().length() == 0)) {
                         if (e instanceof ExpressionColumn) {
                             ce.tableName = ((ExpressionColumn) e).getTableName();
@@ -1137,6 +1136,10 @@ final class RangeVariable {
     // Reference to a range variable representing table this table is joined with.
     RangeVariable joinedWith = null;
     
+    // The distance between this table and the table it's joined with.
+    // The unit of measure is the number of tables in the join statement between the two tables.
+    int joinDistance = 0;
+    
     /**
      * VoltDB added method to get a non-catalog-dependent
      * representation of this HSQLDB object.
@@ -1194,10 +1197,13 @@ final class RangeVariable {
             scan.attributes.put("jointype", "left");
         } else if (isRightJoin) {
             scan.attributes.put("jointype", "right");
+        } else {
+            scan.attributes.put("jointype", "inner");
         }
         
         if (joinedWith != null) {
             scan.attributes.put("joinedwith", joinedWith.rangeTable.getName().name);
+            scan.attributes.put("joindistance", Integer.toString(joinDistance));
         }
 
         // start with the indexCondition
