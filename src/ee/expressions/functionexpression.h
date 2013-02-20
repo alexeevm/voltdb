@@ -204,6 +204,30 @@ static const int FUNC_VOLT_SUBSTRING_CHAR_FROM              = 10000;
 static const int FUNC_VOLT_SQL_ERROR                   = 20000;
 static const int FUNC_DECODE                           = 20001;
 static const int FUNC_VOLT_FIELD                       = 20002;
+
+namespace functionexpression {
+
+class FunctionExpression : public AbstractExpression {
+    public:
+        const AbstractExpression * getArg() const {
+            return m_arg;
+        }
+        const std::vector<AbstractExpression *>* getArgs() const {
+            return m_args;
+        }
+    protected:
+        FunctionExpression(const std::vector<AbstractExpression *>* args,
+            AbstractExpression * const arg) :
+            AbstractExpression(EXPRESSION_TYPE_FUNCTION),
+            m_args(args), m_arg(arg) {
+            assert((m_args == NULL && m_arg != NULL) || (m_args != NULL && m_arg == NULL));
+        }
+        const std::vector<AbstractExpression *>* m_args;
+        AbstractExpression * const m_arg;
+};
+
+}
+
 }
 
 // All of these "...functions.h" files need to be included AFTER the above definitions

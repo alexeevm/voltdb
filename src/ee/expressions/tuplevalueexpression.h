@@ -100,18 +100,18 @@ class TupleValueExpression : public AbstractExpression {
 
     int getColumnId() const {return this->value_idx;}
 
-    std::string getTableName() {
+    std::string getTableName() const {
         return table_name;
     }
 
     // Don't know this index until the executor examines the expression.
-    void setTupleIndex(int idx) {
+    void setTupleIndex(int idx) const {
         tuple_idx = idx;
     }
 
   protected:
 
-    int tuple_idx;           // which tuple. defaults to tuple1
+    mutable int tuple_idx;           // which tuple. defaults to tuple1
     int value_idx;           // which (offset) column of the tuple
     std::string table_name;
     std::string column_name;

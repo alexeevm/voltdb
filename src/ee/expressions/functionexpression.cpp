@@ -108,35 +108,33 @@ public:
  */
 
 template <int F>
-class UnaryFunctionExpression : public AbstractExpression {
-    AbstractExpression * const m_child;
+class UnaryFunctionExpression : public FunctionExpression {
 public:
-    UnaryFunctionExpression(AbstractExpression *child)
-        : AbstractExpression(EXPRESSION_TYPE_FUNCTION)
-        , m_child(child) {
+    UnaryFunctionExpression(AbstractExpression *arg)
+        : FunctionExpression(NULL, arg) {
     }
 
     virtual ~UnaryFunctionExpression() {
-        delete m_child;
+        delete m_arg;
     }
 
     virtual bool hasParameter() const {
-        return m_child->hasParameter();
+        return m_arg->hasParameter();
     }
 
     virtual void substitute(const NValueArray &params) {
-        assert (m_child);
+        assert (m_arg);
 
         if (!m_hasParameter)
             return;
 
         VOLT_TRACE("Substituting parameters for expression \n%s ...", debug(true).c_str());
-        m_child->substitute(params);
+        m_arg->substitute(params);
     }
 
     NValue eval(const TableTuple *tuple1, const TableTuple *tuple2) const {
-        assert (m_child);
-        return (m_child->eval(tuple1, tuple2)).callUnary<F>();
+        assert (m_arg);
+        return (m_arg->eval(tuple1, tuple2)).callUnary<F>();
     }
 
     std::string debugInfo(const std::string &spacer) const {
@@ -150,23 +148,25 @@ public:
  * N-ary functions.
  */
 template <int F>
-class GeneralFunctionExpression : public AbstractExpression {
+class GeneralFunctionExpression : public FunctionExpression {
 public:
-    GeneralFunctionExpression(const std::vector<AbstractExpression *>& args)
-        : AbstractExpression(EXPRESSION_TYPE_FUNCTION), m_args(args) {}
+    GeneralFunctionExpression(const std::vector<AbstractExpression *>* args)
+        : FunctionExpression(args, NULL) {}
 
     virtual ~GeneralFunctionExpression() {
-        size_t i = m_args.size();
+        assert(m_args);
+        size_t i = m_args->size();
         while (i--) {
-            delete m_args[i];
+            delete (*m_args)[i];
         }
-        delete &m_args;
+        delete m_args;
     }
 
     virtual bool hasParameter() const {
-        for (size_t i = 0; i < m_args.size(); i++) {
-            assert(m_args[i]);
-            if (m_args[i]->hasParameter()) {
+        assert(m_args);
+        for (size_t i = 0; i < m_args->size(); i++) {
+            assert((*m_args)[i]);
+            if ((*m_args)[i]->hasParameter()) {
                 return true;
             }
         }
@@ -174,24 +174,26 @@ public:
     }
 
     virtual void substitute(const NValueArray &params) {
+        assert(m_args);
         if (!m_hasParameter)
             return;
 
         VOLT_TRACE("Substituting parameters for expression \n%s ...", debug(true).c_str());
-        for (size_t i = 0; i < m_args.size(); i++) {
-            assert(m_args[i]);
+        for (size_t i = 0; i < m_args->size(); i++) {
+            assert((*m_args)[i]);
             VOLT_TRACE("Substituting parameters for arg at index %d...", static_cast<int>(i));
-            m_args[i]->substitute(params);
+            (*m_args)[i]->substitute(params);
         }
     }
 
     NValue eval(const TableTuple *tuple1, const TableTuple *tuple2) const {
+        assert(m_args);
         //TODO: Could make this vector a member, if the memory management implications
         // (of the NValue internal state) were clear -- is there a penalty for longer-lived
         // NValues that outweighs the current per-eval allocation penalty?
-        std::vector<NValue> nValue(m_args.size());
-        for (int i = 0; i < m_args.size(); ++i) {
-            nValue[i] = m_args[i]->eval(tuple1, tuple2);
+        std::vector<NValue> nValue(m_args->size());
+        for (int i = 0; i < m_args->size(); ++i) {
+            nValue[i] = (*m_args)[i]->eval(tuple1, tuple2);
         }
         return NValue::call<F>(nValue);
     }
@@ -202,8 +204,6 @@ public:
         return (buffer.str());
     }
 
-private:
-    const std::vector<AbstractExpression *>& m_args;
 };
 
 }
@@ -295,37 +295,37 @@ ExpressionUtil::functionFactory(int functionId, const std::vector<AbstractExpres
         // GeneralFunctions defer deleting the arguments container until through with it.
         switch(functionId) {
         case FUNC_CONCAT:
-            ret = new GeneralFunctionExpression<FUNC_CONCAT>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_CONCAT>(arguments);
             break;
         case FUNC_DECODE:
-            ret = new GeneralFunctionExpression<FUNC_DECODE>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_DECODE>(arguments);
             break;
         case FUNC_LEFT:
-            ret = new GeneralFunctionExpression<FUNC_LEFT>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_LEFT>(arguments);
             break;
         case FUNC_POSITION_CHAR:
-            ret = new GeneralFunctionExpression<FUNC_POSITION_CHAR>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_POSITION_CHAR>(arguments);
             break;
         case FUNC_POWER:
-            ret = new GeneralFunctionExpression<FUNC_POWER>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_POWER>(arguments);
             break;
         case FUNC_REPEAT:
-            ret = new GeneralFunctionExpression<FUNC_REPEAT>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_REPEAT>(arguments);
             break;
         case FUNC_RIGHT:
-            ret = new GeneralFunctionExpression<FUNC_RIGHT>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_RIGHT>(arguments);
             break;
         case FUNC_SUBSTRING_CHAR:
-            ret = new GeneralFunctionExpression<FUNC_SUBSTRING_CHAR>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_SUBSTRING_CHAR>(arguments);
             break;
         case FUNC_VOLT_FIELD:
-            ret = new GeneralFunctionExpression<FUNC_VOLT_FIELD>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_VOLT_FIELD>(arguments);
             break;
         case FUNC_VOLT_SQL_ERROR:
-            ret = new GeneralFunctionExpression<FUNC_VOLT_SQL_ERROR>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_VOLT_SQL_ERROR>(arguments);
             break;
         case FUNC_VOLT_SUBSTRING_CHAR_FROM:
-            ret = new GeneralFunctionExpression<FUNC_VOLT_SUBSTRING_CHAR_FROM>(*arguments);
+            ret = new GeneralFunctionExpression<FUNC_VOLT_SUBSTRING_CHAR_FROM>(arguments);
             break;
         default:
             return NULL;

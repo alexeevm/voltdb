@@ -52,6 +52,7 @@
 #include "common/FatalException.hpp"
 #include "expressions/abstractexpression.h"
 #include "expressions/tuplevalueexpression.h"
+#include "expressions/functionexpression.h"
 #include "storage/table.h"
 #include "storage/temptable.h"
 #include "storage/tableiterator.h"
@@ -65,6 +66,7 @@
 
 using namespace std;
 using namespace voltdb;
+using namespace voltdb::functionexpression;
 
 namespace
 {
@@ -75,7 +77,7 @@ namespace
     // common locale to put them and (b) I hope to make them go away
     // soon.
     bool
-    assignTupleValueIndex(AbstractExpression *ae,
+    assignTupleValueIndex(const AbstractExpression *ae,
                           const string &oname,
                           const string &iname)
     {
@@ -86,7 +88,7 @@ namespace
 
         // tuple index 0 is always the outer table.
         // tuple index 1 is always the inner table.
-        TupleValueExpression *tve = dynamic_cast<TupleValueExpression*>(ae);
+        const TupleValueExpression *tve = dynamic_cast<const TupleValueExpression*>(ae);
         string tname = tve->getTableName();
 
         if (oname == "temp" && iname == "temp") {
@@ -128,11 +130,28 @@ namespace
 
             if (right != NULL) {
                 if (right->getExpressionType() == EXPRESSION_TYPE_VALUE_TUPLE) {
-                    if (!assignTupleValueIndex(const_cast<AbstractExpression*>(right),
+                    if (!assignTupleValueIndex(right,
                                                outer_name,
                                                inner_name))
                     {
                         return false;
+                    }
+                } else if (right->getExpressionType() == EXPRESSION_TYPE_FUNCTION) {
+                    const FunctionExpression *functionExpr = dynamic_cast<const FunctionExpression*>(right);
+                    assert(functionExpr != NULL);
+                    const AbstractExpression* argExpr = functionExpr->getArg();
+                    if (argExpr != NULL) {
+                        if (!assignTupleValueIndex(argExpr, outer_name, inner_name)) {
+                            return false;
+                        }
+                    } else {
+                        const std::vector<AbstractExpression *>* argsExpr = functionExpr->getArgs();
+                        assert(argsExpr != NULL);
+                        for (size_t i = 0; i < argsExpr->size(); ++i) {
+                            if (!assignTupleValueIndex((*argsExpr)[i], outer_name, inner_name)) {
+                                return false;
+                            }
+                        }
                     }
                 }
                 // remember the right node - must visit its children
@@ -145,6 +164,23 @@ namespace
                                                inner_name))
                     {
                         return false;
+                    }
+                } else if (left->getExpressionType() == EXPRESSION_TYPE_FUNCTION) {
+                    const FunctionExpression *functionExpr = dynamic_cast<const FunctionExpression*>(right);
+                    assert(functionExpr != NULL);
+                    const AbstractExpression* argExpr = functionExpr->getArg();
+                    if (argExpr != NULL) {
+                        if (!assignTupleValueIndex(argExpr, outer_name, inner_name)) {
+                            return false;
+                        }
+                    } else {
+                        const std::vector<AbstractExpression *>* argsExpr = functionExpr->getArgs();
+                        assert(argsExpr != NULL);
+                        for (size_t i = 0; i < argsExpr->size(); ++i) {
+                            if (!assignTupleValueIndex((*argsExpr)[i], outer_name, inner_name)) {
+                                return false;
+                            }
+                        }
                     }
                 }
             }
