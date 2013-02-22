@@ -61,135 +61,130 @@ namespace voltdb {
 
 namespace detail {
 
+struct UnionExecutorState
+{
+    UnionExecutorState(UnionPlanNode* node):
+        m_iterator(node->getOutputTable()->iterator()),
+        m_schema(node->getOutputTable()->schema()),
+        m_children() {
+        std::vector<AbstractPlanNode*>& children = node->getChildren();
+        for (size_t cnt = 0; cnt < children.size(); cnt++) {
+            m_children.push_back(children[cnt]->getExecutor());
+        }
+    }
+
+    TableIterator m_iterator;
+    const TupleSchema* m_schema;
+    std::vector<AbstractExecutor*> m_children;
+};
+
 struct SetOperator {
+    typedef boost::unordered_set<TableTuple, TableTupleHasher, TableTupleEqualityChecker>
+        TupleSet;
     typedef boost::unordered_map<TableTuple, size_t, TableTupleHasher, TableTupleEqualityChecker>
         TupleMap;
 
-    SetOperator(UnionPlanNode* node, bool is_all);
+    SetOperator(std::vector<Table*>& input_tables, Table* output_table, bool is_all) :
+        m_input_tables(input_tables), m_output_table(output_table), 
+        m_temp_table(), m_is_all(is_all) {
+    
+        TempTable* temp_output = dynamic_cast<TempTable*>(output_table);
+        assert(temp_output != NULL);
+        m_temp_table.reset(TableFactory::getCopiedTempTable(
+            temp_output->databaseId(), temp_output->name(), temp_output, 
+            temp_output->m_limits));
+    }
 
     virtual ~SetOperator() {
     }
 
-    bool processTuples() {
-        // Clear the temp table
-        m_temp_table->deleteAllTuples(false);
-        // Clear tuples.
-        m_tuples.clear();
-
-        return processTuplesDo();
+    bool processTuples(UnionExecutorState* state) {
+        return processTuplesDo(state);
     }
-
-    TableTuple pullNextTuple() const;
 
     static boost::shared_ptr<SetOperator> getSetOperator(UnionPlanNode* node);
 
-    protected:
-        virtual bool processTuplesDo() = 0;
+    std::vector<Table*>& m_input_tables;
 
-        std::vector<AbstractExecutor*> m_children;
-        const TupleSchema* m_schema;
-        // An intermediate table to accumulate tuples
+    protected:
+        virtual bool processTuplesDo(UnionExecutorState* state) = 0;
+
+        Table* m_output_table;
         boost::scoped_ptr<TempTable> m_temp_table;
         bool m_is_all;
-        // Map to keep candidate tuples. The key is the tuple itself
-        // The value - tuple's repeat count in the final table.
-        TupleMap m_tuples;
-
-        // Iterator and counter to keep state between the next_pull calls
-        mutable TupleMap::const_iterator m_output_iterator;
-        mutable size_t m_count;
 };
 
-SetOperator::SetOperator(UnionPlanNode* node, bool is_all) :
-        m_children(),
-        m_schema(node->getOutputTable()->schema()),
-        m_temp_table(),
-        m_is_all(is_all),
-        m_output_iterator(),
-        m_count(0) {
-
-    std::vector<AbstractPlanNode*>& children = node->getChildren();
-    for (size_t cnt = 0; cnt < children.size(); cnt++) {
-        m_children.push_back(children[cnt]->getExecutor());
-    }
-    TempTable* temp_output = dynamic_cast<TempTable*>(node->getOutputTable());
-    assert(temp_output != NULL);
-    m_temp_table.reset(TableFactory::getCopiedTempTable(
-        temp_output->databaseId(), temp_output->name(), temp_output,
-        temp_output->m_limits));
-}
-
-TableTuple SetOperator::pullNextTuple() const {
-    if (m_output_iterator != m_tuples.end()) {
-        if (m_count++ < m_output_iterator->second) {
-            return m_output_iterator->first;
-        } else {
-            m_count = 0;
-            if (++m_output_iterator != m_tuples.end()) {
-                ++m_count;
-                return m_output_iterator->first;
-            } else {
-                return TableTuple(m_schema);
-            }
-        }
-    } else {
-        return TableTuple(m_schema);
-    }
-}
-
 struct UnionSetOperator : public SetOperator {
-    UnionSetOperator(UnionPlanNode* node, bool is_all) :
-       SetOperator(node, is_all)
+    UnionSetOperator(std::vector<Table*>& input_tables, Table* output_table, bool is_all) :
+       SetOperator(input_tables, output_table, is_all)
        {}
 
     protected:
-        bool processTuplesDo();
+        bool processTuplesDo(UnionExecutorState* state);
 
     private:
-        void insertTuple(TableTuple& tuple);
+        bool needToInsert(TableTuple& tuple, TupleSet& tuples);
 
 };
 
-bool UnionSetOperator::processTuplesDo() {
+bool UnionSetOperator::processTuplesDo(UnionExecutorState* state) {
+    // Clear the temp table
+    m_temp_table->deleteAllTuples(false);
+    // Set to keep candidate tuples.
+    TupleSet tuples;
+
     //
     // For each input table, grab their TableIterator and then append all of its tuples
     // to our ouput table. Only distinct tuples are retained.
     //
-    for (size_t cnt = 0; cnt < m_children.size(); cnt++) {
-        AbstractExecutor* childExec = m_children[cnt];
+    for (size_t cnt = 0; cnt < state->m_children.size(); cnt++) {
+        AbstractExecutor* childExec = state->m_children[cnt];
         assert(childExec);
-        TableTuple tuple(m_schema);
+        TableTuple tuple(state->m_schema);
         for (tuple = childExec->next_pull();
                tuple.isNullTuple() == false;
                tuple = childExec->next_pull())  {
-             insertTuple(tuple);
+             if (m_is_all || needToInsert(tuple, tuples)) {
+                // we got tuple to insert
+                if (!m_output_table->insertTuple(tuple)) {
+                    VOLT_ERROR("Failed to insert tuple into output table '%s'",
+                               m_output_table->name().c_str());
+                    return false;
+                }
+            }
         }
     }
+std::cout << "UnionSet count " << m_output_table->activeTupleCount() << '\n';
     // reset the iterator
-    m_output_iterator = m_tuples.begin();
+    state->m_iterator = m_output_table->iterator();
     return true;
 }
 
 inline
-void UnionSetOperator::insertTuple(TableTuple& tuple) {
+bool UnionSetOperator::needToInsert(TableTuple& tuple, TupleSet& tuples) {
     TableTuple inserted_tuple = m_temp_table->insertTupleNonVirtual(tuple);
-    TupleMap::iterator mapIt = m_tuples.find(inserted_tuple);
-    if (mapIt == m_tuples.end()) {
-        m_tuples.insert(std::make_pair(inserted_tuple, 1));
-    } else if (m_is_all) {
-        mapIt->second++;
+    bool result = tuples.find(inserted_tuple) == tuples.end();
+    if (result) {
+        tuples.insert(inserted_tuple);
     }
+    return result;
 }
 
+struct TableSizeLess {
+    bool operator()(const Table* t1, const Table* t2) const {
+        return t1->activeTupleCount() < t2->activeTupleCount();
+    }
+};
+
 struct ExceptIntersectSetOperator : public SetOperator {
-    ExceptIntersectSetOperator(UnionPlanNode* node,
+    ExceptIntersectSetOperator(std::vector<Table*>& input_tables, Table* output_table,
         bool is_all, bool is_except);
 
     protected:
-        bool processTuplesDo();
+        bool processTuplesDo(UnionExecutorState* state);
 
     private:
-        void collectTuples(size_t idx, TupleMap& tuple_map);
+        void collectTuples(UnionExecutorState* state, size_t idx, TupleMap& tuple_map);
         void exceptTupleMaps(TupleMap& tuple_a, TupleMap& tuple_b);
         void intersectTupleMaps(TupleMap& tuple_a, TupleMap& tuple_b);
 
@@ -197,37 +192,66 @@ struct ExceptIntersectSetOperator : public SetOperator {
 };
 
 ExceptIntersectSetOperator::ExceptIntersectSetOperator(
-    UnionPlanNode* node, bool is_all, bool is_except) :
-        SetOperator(node, is_all), m_is_except(is_except) {
+    std::vector<Table*>& input_tables, Table* output_table, bool is_all, bool is_except) :
+        SetOperator(input_tables, output_table, is_all), m_is_except(is_except) {
+    if (!is_except) {
+        // For intersect we want to start with the smalest table
+        std::vector<Table*>::iterator minTableIt =
+            std::min_element(m_input_tables.begin(), m_input_tables.end(), TableSizeLess());
+        std::swap( m_input_tables[0], *minTableIt);
+    }
+
 }
 
-bool ExceptIntersectSetOperator::processTuplesDo() {
+bool ExceptIntersectSetOperator::processTuplesDo(UnionExecutorState* state) {
+    // Clear the temp table
+    m_temp_table->deleteAllTuples(false);
+    
+    // Map to keep candidate tuples. The key is the tuple itself
+    // The value - tuple's repeat count in the final table.
+    TupleMap tuples;
+
     // Collect all tuples from the first set
-    collectTuples(0, m_tuples);
+    collectTuples(state, 0, tuples);
 
     //
     // For each remaining input table, collect its tuple into a separate map
     // and substract/intersect it from/with the first one
     //
     TupleMap next_tuples;
-    for (size_t cnt = 1; cnt < m_children.size(); cnt++) {
+    for (size_t ctr = 1, cnt = m_input_tables.size(); ctr < cnt; ctr++) {
         next_tuples.clear();
-        collectTuples(cnt, next_tuples);
+        collectTuples(state, ctr, next_tuples);
         if (m_is_except) {
-            exceptTupleMaps(m_tuples, next_tuples);
+            exceptTupleMaps(tuples, next_tuples);
         } else {
-            intersectTupleMaps(m_tuples, next_tuples);
+            intersectTupleMaps(tuples, next_tuples);
         }
     }
+
+    // Insert remaining tuples to our ouput table
+    for (TupleMap::const_iterator mapIt = tuples.begin(); mapIt != tuples.end(); ++mapIt) {
+        TableTuple tuple = mapIt->first;
+        for (size_t i = 0; i < mapIt->second; ++i) {
+            if (!m_output_table->insertTuple(tuple)) {
+                VOLT_ERROR("Failed to insert tuple from input table '%s' into"
+                           " output table '%s'",
+                           m_input_tables[0]->name().c_str(),
+                           m_output_table->name().c_str());
+                return false;
+            }
+        }
+    }
+std::cout << "ExceptIntersectSet count " << m_output_table->activeTupleCount() << '\n';
     // reset the iterator
-    m_output_iterator = m_tuples.begin();
+    state->m_iterator = m_output_table->iterator();
     return true;
 }
 
-void ExceptIntersectSetOperator::collectTuples(size_t idx, TupleMap& tuple_map) {
-    AbstractExecutor* childExec = m_children[idx];
+void ExceptIntersectSetOperator::collectTuples(UnionExecutorState* state, size_t idx, TupleMap& tuple_map) {
+    AbstractExecutor* childExec = state->m_children[idx];
     assert(childExec);
-    TableTuple tuple(m_schema);
+    TableTuple tuple(state->m_schema);
 
     for (tuple = childExec->next_pull();
            tuple.isNullTuple() == false;
@@ -278,17 +302,23 @@ boost::shared_ptr<SetOperator> SetOperator::getSetOperator(UnionPlanNode* node) 
     UnionType unionType = node->getUnionType();
     switch (unionType) {
         case UNION_TYPE_UNION_ALL:
-            return boost::shared_ptr<SetOperator>(new UnionSetOperator(node, true));
+            return boost::shared_ptr<SetOperator>(
+            new UnionSetOperator(node->getInputTables(), node->getOutputTable(), true));
         case UNION_TYPE_UNION:
-            return boost::shared_ptr<SetOperator>(new UnionSetOperator(node, false));
+            return boost::shared_ptr<SetOperator>(
+            new UnionSetOperator(node->getInputTables(), node->getOutputTable(), false));
         case UNION_TYPE_EXCEPT_ALL:
-            return boost::shared_ptr<SetOperator>(new ExceptIntersectSetOperator(node, true, true));
+            return boost::shared_ptr<SetOperator>(
+            new ExceptIntersectSetOperator(node->getInputTables(), node->getOutputTable(), true, true));
         case UNION_TYPE_EXCEPT:
-            return boost::shared_ptr<SetOperator>(new ExceptIntersectSetOperator(node, false, true));
+            return boost::shared_ptr<SetOperator>(
+            new ExceptIntersectSetOperator(node->getInputTables(), node->getOutputTable(), false, true));
         case UNION_TYPE_INTERSECT_ALL:
-            return boost::shared_ptr<SetOperator>(new ExceptIntersectSetOperator(node, true, false));
+            return boost::shared_ptr<SetOperator>(
+            new ExceptIntersectSetOperator(node->getInputTables(), node->getOutputTable(), true, false));
         case UNION_TYPE_INTERSECT:
-            return boost::shared_ptr<SetOperator>(new ExceptIntersectSetOperator(node, false, false));
+            return boost::shared_ptr<SetOperator>(
+            new ExceptIntersectSetOperator(node->getInputTables(), node->getOutputTable(), false, false));
         default:
             VOLT_ERROR("Unsupported tuple set operation '%d'.", unionType);
             return boost::shared_ptr<SetOperator>();
@@ -370,7 +400,7 @@ bool UnionExecutor::p_init(AbstractPlanNode* abstract_node,
 }
 
 bool UnionExecutor::p_execute(const NValueArray &params) {
-    return m_setOperator->processTuples();
+    return m_setOperator->processTuples(m_state.get());
 }
 
 bool UnionExecutor::support_pull() const
@@ -380,12 +410,21 @@ bool UnionExecutor::support_pull() const
 
 void UnionExecutor::p_pre_execute_pull(const NValueArray &params)
 {
-    m_setOperator->processTuples();
+    UnionPlanNode* node = dynamic_cast<UnionPlanNode*>(getPlanNode());
+    assert (node);
+    m_state.reset(new detail::UnionExecutorState(node));
+    m_setOperator->processTuples(m_state.get());
 }
 
 TableTuple UnionExecutor::p_next_pull()
 {
-    return m_setOperator->pullNextTuple();
+    TableTuple tuple(m_state->m_schema);
+    if (m_state->m_iterator.next(tuple)) {
+std::cout << "tuple " << tuple.debug("here") << '\n';
+        return tuple;
+    }
+std::cout << "done tuple\n";
+    return TableTuple(m_state->m_schema);
 }
 
 }

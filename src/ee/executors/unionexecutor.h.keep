@@ -59,6 +59,7 @@ class ReadWriteSet;
 
 namespace detail {
     struct SetOperator;
+    struct UnionExecutorState;
 }
 
 /**
@@ -68,6 +69,10 @@ class UnionExecutor : public AbstractExecutor {
     public:
         UnionExecutor(VoltDBEngine *engine, AbstractPlanNode* abstract_node);
         bool support_pull() const;
+        
+        bool parent_send_need_save_tuple_pull() const {
+            return false;
+        }
 
     protected:
         bool p_init(AbstractPlanNode*,
@@ -78,6 +83,7 @@ class UnionExecutor : public AbstractExecutor {
         void p_pre_execute_pull(const NValueArray& params);
     private:
         boost::shared_ptr<detail::SetOperator> m_setOperator;
+        boost::scoped_ptr<detail::UnionExecutorState> m_state;
 };
 
 }
