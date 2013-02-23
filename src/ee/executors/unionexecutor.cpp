@@ -79,9 +79,9 @@ struct SetOperator {
         return processTuplesDo();
     }
 
-    TableTuple pullNextTuple() const;
+    TableTuple pullNextTuple();
 
-    static boost::shared_ptr<SetOperator> getSetOperator(UnionPlanNode* node);
+    static SetOperator* getSetOperator(UnionPlanNode* node);
 
     protected:
         virtual bool processTuplesDo() = 0;
@@ -96,8 +96,8 @@ struct SetOperator {
         TupleMap m_tuples;
 
         // Iterator and counter to keep state between the next_pull calls
-        mutable TupleMap::const_iterator m_output_iterator;
-        mutable size_t m_count;
+        TupleMap::const_iterator m_output_iterator;
+        size_t m_count;
 };
 
 SetOperator::SetOperator(UnionPlanNode* node, bool is_all) :
@@ -119,7 +119,7 @@ SetOperator::SetOperator(UnionPlanNode* node, bool is_all) :
         temp_output->m_limits));
 }
 
-TableTuple SetOperator::pullNextTuple() const {
+TableTuple SetOperator::pullNextTuple() {
     if (m_output_iterator != m_tuples.end()) {
         if (m_count++ < m_output_iterator->second) {
             return m_output_iterator->first;
@@ -172,9 +172,9 @@ bool UnionSetOperator::processTuplesDo() {
 
 inline
 void UnionSetOperator::insertTuple(TableTuple& tuple) {
-    TableTuple inserted_tuple = m_temp_table->insertTupleNonVirtual(tuple);
-    TupleMap::iterator mapIt = m_tuples.find(inserted_tuple);
+    TupleMap::iterator mapIt = m_tuples.find(tuple);
     if (mapIt == m_tuples.end()) {
+        TableTuple inserted_tuple = m_temp_table->insertTupleNonVirtual(tuple);
         m_tuples.insert(std::make_pair(inserted_tuple, 1));
     } else if (m_is_all) {
         mapIt->second++;
@@ -232,9 +232,9 @@ void ExceptIntersectSetOperator::collectTuples(size_t idx, TupleMap& tuple_map) 
     for (tuple = childExec->next_pull();
            tuple.isNullTuple() == false;
            tuple = childExec->next_pull())  {
-        TableTuple inserted_tuple = m_temp_table->insertTupleNonVirtual(tuple);
-        TupleMap::iterator mapIt = tuple_map.find(inserted_tuple);
+        TupleMap::iterator mapIt = tuple_map.find(tuple);
         if (mapIt == tuple_map.end()) {
+            TableTuple inserted_tuple = m_temp_table->insertTupleNonVirtual(tuple);
             tuple_map.insert(std::make_pair(inserted_tuple, 1));
         } else if (m_is_all) {
             ++mapIt->second;
@@ -274,24 +274,24 @@ void ExceptIntersectSetOperator::intersectTupleMaps(TupleMap& map_a, TupleMap& m
     }
 }
 
-boost::shared_ptr<SetOperator> SetOperator::getSetOperator(UnionPlanNode* node) {
+SetOperator* SetOperator::getSetOperator(UnionPlanNode* node) {
     UnionType unionType = node->getUnionType();
     switch (unionType) {
         case UNION_TYPE_UNION_ALL:
-            return boost::shared_ptr<SetOperator>(new UnionSetOperator(node, true));
+            return new UnionSetOperator(node, true);
         case UNION_TYPE_UNION:
-            return boost::shared_ptr<SetOperator>(new UnionSetOperator(node, false));
+            return new UnionSetOperator(node, false);
         case UNION_TYPE_EXCEPT_ALL:
-            return boost::shared_ptr<SetOperator>(new ExceptIntersectSetOperator(node, true, true));
+            return new ExceptIntersectSetOperator(node, true, true);
         case UNION_TYPE_EXCEPT:
-            return boost::shared_ptr<SetOperator>(new ExceptIntersectSetOperator(node, false, true));
+            return new ExceptIntersectSetOperator(node, false, true);
         case UNION_TYPE_INTERSECT_ALL:
-            return boost::shared_ptr<SetOperator>(new ExceptIntersectSetOperator(node, true, false));
+            return new ExceptIntersectSetOperator(node, true, false);
         case UNION_TYPE_INTERSECT:
-            return boost::shared_ptr<SetOperator>(new ExceptIntersectSetOperator(node, false, false));
+            return new ExceptIntersectSetOperator(node, false, false);
         default:
             VOLT_ERROR("Unsupported tuple set operation '%d'.", unionType);
-            return boost::shared_ptr<SetOperator>();
+            return NULL;
     }
 }
 
@@ -365,7 +365,7 @@ bool UnionExecutor::p_init(AbstractPlanNode* abstract_node,
                                                           node->getInputTables()[0],
                                                           limits));
 
-    m_setOperator = detail::SetOperator::getSetOperator(node);
+    m_setOperator.reset(detail::SetOperator::getSetOperator(node));
     return true;
 }
 
