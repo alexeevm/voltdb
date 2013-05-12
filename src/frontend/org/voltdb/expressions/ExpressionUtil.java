@@ -427,6 +427,23 @@ public abstract class ExpressionUtil {
             } else if (expr.m_left.getExpressionType() == ExpressionType.CONJUNCTION_AND ||
                     expr.m_left.getExpressionType() == ExpressionType.CONJUNCTION_OR) {
                 assert(expr.m_left.m_left != null && expr.m_left.m_right != null);
+                //TODO: ? Need to test for an existing child NOT and skip it rather than compound it.
+                // Aside from efficiency, there is a correctness issue.
+                // e.g.            NOT (P AND NOT Q) --> (NOT P) OR NOT NOT Q
+                // since NOT NOT doesn't fall into any of the "NOT ___" special cases, this gets
+                // treated in the recursive calls as --> (NOT P) OR NOT Q
+                // This case SHOULD be processed as:
+                //                 NOT (P AND NOT Q) --> (NOT P) OR Q
+                // This difference can be significant (depending on P)
+                // when Q is or contains an "IS NULL" expression.
+                //
+                // It's probably safe to assume that HSQL will have stripped out other double negatives,
+                // (like "NOT T.c IS NOT NULL") so if we avoid introducing new ones,
+                // we might not have to be on guard for them. Yet, we could also handle them below with:
+                //  // "NOT ( NOT P )" is as null-rejecting as "P"
+                //  } else if (expr.m_left.getExpressionType() == ExpressionType.OPERATOR_NOT) {
+                //      assert(expr.m_left.m_left != null);
+                //      return isNullRejectingExpression(expr.m_left.m_left, tableName);
                 AbstractExpression tempLeft = new OperatorExpression(ExpressionType.OPERATOR_NOT, expr.m_left.m_left, null);
                 AbstractExpression tempRight = new OperatorExpression(ExpressionType.OPERATOR_NOT, expr.m_left.m_right, null);
                 ExpressionType type = (expr.m_left.getExpressionType() == ExpressionType.CONJUNCTION_AND) ?

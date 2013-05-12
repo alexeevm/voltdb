@@ -440,7 +440,10 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
                 // Optimizations - outer-table-only where expressions can be pushed down to the child node
                 // to pre-qualify the outer tuples before they enter the join.
                 if (childNode.m_table != null) {
-                    childNode.m_accessPaths.addAll(getRelevantAccessPathsForTable(childNode.m_table, null,parentNode.m_whereOuterList));
+                    childNode.m_accessPaths.addAll(getRelevantAccessPathsForTable(childNode.m_table,
+                                                                                  null,
+                                                                                  parentNode.m_whereOuterList,
+                                                                                  null));
                 } else {
                     childNode.m_accessPaths.add(getRelevantNaivePathForTable(null, parentNode.m_whereOuterList));
                 }
@@ -453,7 +456,8 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
             childNode.m_accessPaths.add(getRelevantNaivePathForTable(null, null));
         }
         assert(childNode.m_accessPaths.size() > 0);
-   }
+    }
+
     /**
      * generate all possible plans for the tree.
      *
@@ -591,7 +595,7 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
              * If the access plan for the table in the join order was for a
              * distributed table scan there will be a send/receive pair at the top.
              */
-            if (canDeferSendReceivePairForNode(joinOrder[at].getIsreplicated())) {
+            if (joinOrder[at].getIsreplicated() || canDeferSendReceivePairForNode()) {
                 continue;
             }
             resultPlan = addSendReceivePair(resultPlan);
