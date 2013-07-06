@@ -88,7 +88,7 @@ public class TestParsedStatements extends TestCase {
         // get a parsed statement from the xml
         AbstractParsedStmt parsedStmt = AbstractParsedStmt.parse(stmtSQL, xmlSQL, null, m_db, null);
         // analyze expressions
-        parsedStmt.analyzeTreeExpressions(parsedStmt.joinTree);
+        parsedStmt.analyzeJoinExpressions(parsedStmt.joinTree);
         // output a description of the parsed stmt
         BuildDirectoryUtils.writeFile("statement-hsql-parsed", stmtName + ".txt", parsedStmt.toString());
 
@@ -127,5 +127,16 @@ public class TestParsedStatements extends TestCase {
         for (Entry<String, String> entry : m_allSQL.updates.entrySet()) {
             runSQLTest(entry.getKey(), entry.getValue());
         }
+    }
+
+    public void testParsedInStatements() {
+        runSQLTest("1", "select * from new_order where no_w_id in (5,7);");
+        runSQLTest("2", "select * from new_order where no_w_id in (?);");
+        runSQLTest("3", "select * from new_order where no_w_id in (?,5,3,?);");
+        runSQLTest("4", "select * from new_order where no_w_id not in (?,5,3,?);");
+        runSQLTest("5", "select * from warehouse where w_name not in (?, 'foo');");
+        runSQLTest("6", "select * from new_order where no_w_id in (no_d_id, no_o_id, ?, 7);");
+        runSQLTest("7", "select * from new_order where no_w_id in (abs(-1), ?, 17761776);");
+        runSQLTest("8", "select * from new_order where no_w_id in (abs(17761776), ?, 17761776) and no_d_id in (abs(-1), ?, 17761776);");
     }
 }
