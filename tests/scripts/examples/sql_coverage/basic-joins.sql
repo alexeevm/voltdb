@@ -7,7 +7,7 @@
 {@idcol = "ID"}
 {@numcol = "NUM"}
 
--- Repeat queries with forced data value overlaps between tables.
+-- Run queries with no data value overlaps between tables.
 <join-template.sql>
 
 -- Force some non-random values to get overlaps -- yes sadly this breaks the schema-independence of the test.
@@ -18,7 +18,9 @@ INSERT INTO _table VALUES (1011, 'desc_1010', 1010, 1010.5)
 -- Purposely excluding rows from some _tables to tease out different cases.
 INSERT INTO P1 VALUES (1020, 'desc_1020', 1020, 1020.5)
 INSERT INTO R1 VALUES (1020, 'desc_1020', 1020, 1020.5)
-INSERT INTO R2 VALUES (1020, 'desc_1020', 1020, 1020.5)
+
+INSERT INTO P1 VALUES (1030, 'desc_1030', 1030, 1030.5)
+INSERT INTO R2 VALUES (1030, 'desc_1030', 1030, 1030.5)
 
 -- Repeat queries with forced data value overlaps between tables.
 <join-template.sql>
