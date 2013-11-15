@@ -71,14 +71,14 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
         if (parsedStmt.joinOrder != null) {
             //Extract the table names/aliases from the , separated list
             ArrayList<String> tableAliases = new ArrayList<String>();
-            //Don't allow dups for now since self joins aren't supported
+            //Each table in the join order must be uniquely identified
             HashSet<String> dupCheck = new HashSet<String>();
             for (String table : parsedStmt.joinOrder.split(",")) {
                 tableAliases.add(table.trim());
                 if (!dupCheck.add(table.trim())) {
                     StringBuilder sb = new StringBuilder();
                     sb.append("The specified join order \"");
-                    sb.append(parsedStmt.joinOrder).append("\" contains duplicate tables. ");
+                    sb.append(parsedStmt.joinOrder).append("\" contains duplicate table names/aliases. ");
                     throw new RuntimeException(sb.toString());
                 }
             }
