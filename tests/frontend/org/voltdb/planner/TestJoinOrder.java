@@ -136,22 +136,41 @@ public class TestJoinOrder extends PlannerTestCase {
         } catch (Exception ex) {
             assertTrue("The specified join order is invalid for the given query".equals(ex.getMessage()));
         }
+    }
+
+    public void testInvalidJoinOrder() {
+        try {
+            compileWithInvalidJoinOrder("select * FROM T1, T2, T3 LEFT JOIN T4 ON T3.C = T4.D LEFT JOIN T5 ON T3.C = T5.E, T6,T7",
+                    "T1, T2, T3, T4, T5, T7, T6, T8");
+            fail();
+        } catch (Exception ex) {
+            assertTrue(ex.getMessage().indexOf("contains too many tables") != -1);
+        }
 
         try {
             compileWithInvalidJoinOrder("select * FROM T1, T2, T3 LEFT JOIN T4 ON T3.C = T4.D LEFT JOIN T5 ON T3.C = T5.E, T6,T7",
                     "T1, T2, T3, T4, T5, T7");
             fail();
         } catch (Exception ex) {
-            assertTrue(ex.getMessage().indexOf("does not contain the correct number of tables") != -1);
+            assertTrue(ex.getMessage().indexOf("contains too few tables") != -1);
         }
 
         try {
             compileWithInvalidJoinOrder("select * FROM T1, T2, T3 LEFT JOIN T4 ON T3.C = T4.D LEFT JOIN T5 ON T3.C = T5.E, T6,T7",
-                    "T1, T2, T3, T4, T5, T7, T6, T8");
+                    "T1, T2, T3, T4, T5, T6, T6");
             fail();
         } catch (Exception ex) {
-            assertTrue(ex.getMessage().indexOf("does not contain the correct number of tables") != -1);
+            assertTrue(ex.getMessage().indexOf("contains duplicate table names or aliases") != -1);
         }
+
+        try {
+            compileWithInvalidJoinOrder("select * FROM T1, T2, T3 LEFT JOIN T4 ON T3.C = T4.D LEFT JOIN T5 ON T3.C = T5.E, T6,T7",
+                    "T1, T2, T3, T4, T5, T6, T8");
+            fail();
+        } catch (Exception ex) {
+            assertTrue(ex.getMessage().indexOf("contains table name(s) or alias(es) that do(es) not belong to the query") != -1);
+        }
+
     }
 
     @Override

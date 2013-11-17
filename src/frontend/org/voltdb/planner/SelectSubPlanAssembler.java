@@ -71,48 +71,45 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
         if (parsedStmt.joinOrder != null) {
             //Extract the table names/aliases from the , separated list
             ArrayList<String> tableAliases = new ArrayList<String>();
-            //Each table in the join order must be uniquely identified
-            HashSet<String> dupCheck = new HashSet<String>();
             for (String table : parsedStmt.joinOrder.split(",")) {
                 tableAliases.add(table.trim());
-                if (!dupCheck.add(table.trim())) {
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("The specified join order \"");
-                    sb.append(parsedStmt.joinOrder).append("\" contains duplicate table names/aliases. ");
-                    throw new RuntimeException(sb.toString());
-                }
             }
 
-            if (parsedStmt.tableAliasIndexMap.size() != tableAliases.size()) {
+            HashSet<String> orderSet = new HashSet<String>(tableAliases);
+            Set<String> fromSet = parsedStmt.tableAliasIndexMap.keySet();
+            if (tableAliases.size() > fromSet.size()) {
                 StringBuilder sb = new StringBuilder();
                 sb.append("The specified join order \"");
-                sb.append(parsedStmt.joinOrder).append("\" does not contain the correct number of tables\n");
-                sb.append("Expected ").append(parsedStmt.tableList.size());
-                sb.append(" but found ").append(tableAliases.size()).append(" tables");
+                sb.append(parsedStmt.joinOrder).append("\" contains too many tables.\n");
+                sb.append("To be valid for this query, the join order must be some permutation of \n");
+                sb.append(generateAliasesString(sb, orderSet)).append(" tables.");
+                throw new RuntimeException(sb.toString());
+            } else if (tableAliases.size() < fromSet.size()) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("The specified join order \"");
+                sb.append(parsedStmt.joinOrder).append("\" contains too few tables.\n");
+                sb.append("To be valid for this query, the join order must be some permutation of \n");
+                sb.append(generateAliasesString(sb, orderSet)).append(" tables.");
                 throw new RuntimeException(sb.toString());
             }
 
-            Set<String> aliasSet = parsedStmt.tableAliasIndexMap.keySet();
-            Set<String> specifiedNames = new HashSet<String>(tableAliases);
-            specifiedNames.removeAll(aliasSet);
-            if (specifiedNames.isEmpty() == false) {
+            if (orderSet.size() < fromSet.size()) {
                 StringBuilder sb = new StringBuilder();
                 sb.append("The specified join order \"");
-                sb.append(parsedStmt.joinOrder).append("\" contains ");
-                int i = 0;
-                for (String name : specifiedNames) {
-                    sb.append(name);
-                    if (++i != specifiedNames.size()) {
-                        sb.append(',');
-                    }
-                }
-                sb.append(" which ");
-                if (specifiedNames.size() == 1) {
-                    sb.append("doesn't ");
-                } else {
-                    sb.append("don't ");
-                }
-                sb.append("exist in the FROM clause");
+                sb.append(parsedStmt.joinOrder).append("\" contains duplicate table names or aliases\n");
+                sb.append("To be valid for this query, the join order must be some permutation of \n");
+                sb.append(generateAliasesString(sb, orderSet)).append(" tables.");
+                throw new RuntimeException(sb.toString());
+            }
+
+            orderSet.removeAll(fromSet);
+            if (orderSet.isEmpty() == false) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("The specified join order \"");
+                sb.append(parsedStmt.joinOrder);
+                sb.append("\" contains table name(s) or alias(es) that do(es) not belong to the query.\n");
+                sb.append("To be valid for this query, the join order must be some permutation of \n");
+                sb.append(generateAliasesString(sb, orderSet)).append(" tables.");
                 throw new RuntimeException(sb.toString());
             }
             if ( ! isValidJoinOrder(tableAliases)) {
@@ -123,6 +120,79 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
         } else {
             queueAllJoinOrders();
         }
+    }
+
+
+//
+//        if (parsedStmt.joinOrder != null) {
+//            //Extract the table names/aliases from the , separated list
+//            ArrayList<String> tableAliases = new ArrayList<String>();
+//            //Each table in the join order must be uniquely identified
+//            HashSet<String> dupCheck = new HashSet<String>();
+//            for (String table : parsedStmt.joinOrder.split(",")) {
+//                tableAliases.add(table.trim());
+//                if (!dupCheck.add(table.trim())) {
+//                    StringBuilder sb = new StringBuilder();
+//                    sb.append("The specified join order \"");
+//                    sb.append(parsedStmt.joinOrder).append("\" contains duplicate table names/aliases. ");
+//                    throw new RuntimeException(sb.toString());
+//                }
+//            }
+//
+//            if (parsedStmt.tableAliasIndexMap.size() != tableAliases.size()) {
+//                StringBuilder sb = new StringBuilder();
+//                sb.append("The specified join order \"");
+//                sb.append(parsedStmt.joinOrder).append("\" does not contain the correct number of tables\n");
+//                sb.append("Expected ").append(parsedStmt.tableList.size());
+//                sb.append(" but found ").append(tableAliases.size()).append(" tables");
+//                throw new RuntimeException(sb.toString());
+//            }
+//
+//            Set<String> aliasSet = parsedStmt.tableAliasIndexMap.keySet();
+//            Set<String> specifiedNames = new HashSet<String>(tableAliases);
+//            specifiedNames.removeAll(aliasSet);
+//            if (specifiedNames.isEmpty() == false) {
+//                StringBuilder sb = new StringBuilder();
+//                sb.append("The specified join order \"");
+//                sb.append(parsedStmt.joinOrder).append("\" contains ");
+//                int i = 0;
+//                for (String name : specifiedNames) {
+//                    sb.append(name);
+//                    if (++i != specifiedNames.size()) {
+//                        sb.append(',');
+//                    }
+//                }
+//                sb.append(" which ");
+//                if (specifiedNames.size() == 1) {
+//                    sb.append("doesn't ");
+//                } else {
+//                    sb.append("don't ");
+//                }
+//                sb.append("exist in the FROM clause");
+//                throw new RuntimeException(sb.toString());
+//            }
+//            if ( ! isValidJoinOrder(tableAliases)) {
+//                throw new RuntimeException("The specified join order is invalid for the given query");
+//            }
+//            //m_parsedStmt.joinTree.m_joinOrder = tables;
+//            m_joinOrders.add(m_parsedStmt.joinTree);
+//        } else {
+//            queueAllJoinOrders();
+//        }
+//
+//
+//    }
+
+    private StringBuilder generateAliasesString(StringBuilder sb, Collection<String> names) {
+        int size = names.size();
+        int idx = 0;
+        for (String name : names) {
+            sb.append(name);
+            if (idx++ != size) {
+                sb.append(", ");
+            }
+        }
+        return sb;
     }
 
     /**
