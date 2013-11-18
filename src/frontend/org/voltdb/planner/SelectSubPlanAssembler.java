@@ -113,7 +113,12 @@ public class SelectSubPlanAssembler extends SubPlanAssembler {
                 throw new RuntimeException(sb.toString());
             }
             if ( ! isValidJoinOrder(tableAliases)) {
-                throw new RuntimeException("The specified join order is invalid for the given query");
+                StringBuilder sb = new StringBuilder();
+                sb.append("The specified join order \"");
+                sb.append(parsedStmt.joinOrder);
+                sb.append("\" invaildates the query semantics.\n");
+                sb.append("The order of the tables involved in outer joins must match the order specified in the query");
+                throw new RuntimeException(sb.toString());
             }
             //m_parsedStmt.joinTree.m_joinOrder = tables;
             m_joinOrders.add(m_parsedStmt.joinTree);

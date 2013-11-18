@@ -90,7 +90,7 @@ public class TestJoinOrder extends PlannerTestCase {
             compileWithInvalidJoinOrder("select * FROM T1 LEFT JOIN T2 ON T1.A = T2.B", "T2, T1");
             fail();
         } catch (Exception ex) {
-            assertTrue("The specified join order is invalid for the given query".equals(ex.getMessage()));
+            assertTrue(ex.getMessage().indexOf("invaildates the query semantics") != -1);
         }
     }
 
@@ -126,7 +126,7 @@ public class TestJoinOrder extends PlannerTestCase {
                     "T2, T6, T3, T4, T5, T7, T1");
             fail();
         } catch (Exception ex) {
-            assertTrue("The specified join order is invalid for the given query".equals(ex.getMessage()));
+            assertTrue(ex.getMessage().indexOf("invaildates the query semantics") != -1);
         }
 
         try {
@@ -134,7 +134,7 @@ public class TestJoinOrder extends PlannerTestCase {
                     "T1, T2, T4, T3, T5, T7, T6");
             fail();
         } catch (Exception ex) {
-            assertTrue("The specified join order is invalid for the given query".equals(ex.getMessage()));
+            assertTrue(ex.getMessage().indexOf("invaildates the query semantics") != -1);
         }
     }
 
