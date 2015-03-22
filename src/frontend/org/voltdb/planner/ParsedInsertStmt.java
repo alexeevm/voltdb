@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -24,8 +24,10 @@ import java.util.Map.Entry;
 
 import org.hsqldb_voltpatches.VoltXMLElement;
 import org.voltdb.VoltType;
+import org.voltdb.catalog.CatalogMap;
 import org.voltdb.catalog.Column;
 import org.voltdb.catalog.Database;
+import org.voltdb.catalog.Statement;
 import org.voltdb.catalog.Table;
 import org.voltdb.expressions.AbstractExpression;
 import org.voltdb.expressions.ConstantValueExpression;
@@ -71,9 +73,8 @@ public class ParsedInsertStmt extends AbstractParsedStmt {
         String tableName = stmtNode.attributes.get("table");
         // Need to add the table to the cache. It may be required to resolve the
         // correlated TVE in case of WHERE clause contains IN subquery
-        addTableToStmtCache(tableName, tableName, null);
-
         Table table = getTableFromDB(tableName);
+        addTableToStmtCache(table, tableName);
 
         m_tableList.add(table);
 
@@ -180,19 +181,14 @@ public class ParsedInsertStmt extends AbstractParsedStmt {
         return expr;
     }
 
-    public boolean isInsertWithSubquery() {
-        if (m_subquery != null) {
-            return true;
-        }
-        return false;
-    }
+    public StmtSubqueryScan getSubqueryScan() { return m_subquery; }
 
     /**
      * Return the subqueries for this statement.  For INSERT statements,
      * there can be only one.
      */
     @Override
-    public List<StmtSubqueryScan> getTableSubqueries() {
+    public List<StmtSubqueryScan> getSubqueryScans() {
         List<StmtSubqueryScan> subqueries = new ArrayList<>();
 
         if (m_subquery != null) {
@@ -216,5 +212,17 @@ public class ParsedInsertStmt extends AbstractParsedStmt {
     public boolean isOrderDeterministicInSpiteOfUnorderedSubqueries() {
         assert(getSubselectStmt() != null);
         return getSubselectStmt().isOrderDeterministicInSpiteOfUnorderedSubqueries();
+    }
+
+    /**
+     * Returns true if the table being inserted into has a trigger executed
+     * when row limit is met
+     */
+    public boolean targetTableHasLimitRowsTrigger() {
+        assert(m_tableList.size() == 1);
+        CatalogMap<Statement> stmtMap = m_tableList.get(0).getTuplelimitdeletestmt();
+        if (stmtMap != null && stmtMap.size() > 0)
+            return true;
+        return false;
     }
 }

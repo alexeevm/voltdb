@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -41,19 +41,26 @@ ExecutorContext::ExecutorContext(int64_t siteId,
                 Pool* tempStringPool,
                 NValueArray* params,
                 VoltDBEngine* engine,
-                bool exportEnabled,
                 std::string hostname,
                 CatalogId hostId,
-                DRTupleStream *drStream) :
-    m_topEnd(topend), m_tempStringPool(tempStringPool),
+                DRTupleStream *drStream,
+                DRTupleStream *drReplicatedStream) :
+    m_topEnd(topend),
+    m_tempStringPool(tempStringPool),
     m_undoQuantum(undoQuantum),
-    m_staticParams(params), m_executorsMap(),
-    m_drStream(drStream), m_engine(engine),
-    m_txnId(0), m_spHandle(0),
+    m_staticParams(params),
+    m_executorsMap(),
+    m_drStream(drStream),
+    m_drReplicatedStream(drReplicatedStream),
+    m_engine(engine),
+    m_txnId(0),
+    m_spHandle(0),
     m_lastCommittedSpHandle(0),
-    m_siteId(siteId), m_partitionId(partitionId),
-    m_hostname(hostname), m_hostId(hostId),
-    m_exportEnabled(exportEnabled), m_epoch(0) // set later
+    m_siteId(siteId),
+    m_partitionId(partitionId),
+    m_hostname(hostname),
+    m_hostId(hostId),
+    m_epoch(0) // set later
 {
     (void)pthread_once(&static_keyOnce, createThreadLocalKey);
     bindToThread();
@@ -87,6 +94,12 @@ ExecutorContext* ExecutorContext::getExecutorContext() {
 Table* ExecutorContext::executeExecutors(int subqueryId) const
 {
     const std::vector<AbstractExecutor*>& executorList = getExecutors(subqueryId);
+    return executeExecutors(executorList, subqueryId);
+}
+
+Table* ExecutorContext::executeExecutors(const std::vector<AbstractExecutor*>& executorList,
+                                         int subqueryId) const
+{
     // Walk through the list and execute each plannode.
     // The query planner guarantees that for a given plannode,
     // all of its children are positioned before it in this list,
@@ -110,6 +123,26 @@ Table* ExecutorContext::executeExecutors(int subqueryId) const
         // This needs to be the caller's responsibility for normal returns because
         // the caller may want to first examine the final output table.
         cleanupExecutors(subqueryId);
+        // Normally, each executor cleans its memory pool as it finishes execution,
+        // but in the case of a throw, it may not have had the chance.
+        // So, clean up all the memory pools now.
+        //TODO: This code singles out inline nodes for cleanup.
+        // Is that because the currently active (memory pooling) non-inline
+        // executor always cleans itself up before throwing???
+        // But if an active executor can be that smart, an active executor with
+        // (potential) inline children could also be smart enough to clean up
+        // after its inline children, and this post-processing would not be needed.
+        BOOST_FOREACH (AbstractExecutor *executor, executorList) {
+            assert (executor);
+            AbstractPlanNode * node = executor->getPlanNode();
+            std::map<PlanNodeType, AbstractPlanNode*>::iterator it;
+            std::map<PlanNodeType, AbstractPlanNode*> inlineNodes = node->getInlinePlanNodes();
+            for (it = inlineNodes.begin(); it != inlineNodes.end(); it++ ) {
+                AbstractPlanNode *inlineNode = it->second;
+                inlineNode->getExecutor()->cleanupMemoryPool();
+            }
+        }
+
         if (subqueryId == 0) {
             VOLT_TRACE("The Executor's execution at position '%d' failed", ctr);
         } else {

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -50,8 +50,7 @@ public class ParsedUpdateStmt extends AbstractParsedStmt {
         Table table = m_tableList.get(0);
         // Need to add the table to the cache. It may be required to resolve the
         // correlated TVE in case of WHERE clause contains IN subquery
-        addTableToStmtCache(table.getTypeName(), table.getTypeName(), null);
-
+        addTableToStmtCache(table, table.getTypeName());
 
         for (VoltXMLElement child : stmtNode.children) {
             if (child.name.equalsIgnoreCase("columns")) {

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -110,9 +110,10 @@ public class MpProcedureTask extends ProcedureTask
         String spName = txn.m_initiationMsg.getStoredProcedureName();
 
         // certain system procs can and can't be restarted
-        // Right now this is adhoc and catalog update. Since these are treated specially
-        // in a few places (here, recovery, dr), maybe we should add another metadata
-        // property the sysproc registry about whether a proc can be restarted/recovered/dr-ed
+        // Right now this is adhoc, catalog update, load MP table, and apply binary log MP.
+        // Since these are treated specially in a few places (here, recovery, dr),
+        // maybe we should add another metadata property the sysproc registry about
+        // whether a proc can be restarted/recovered/dr-ed
         //
         // Note that we don't restart @BalancePartitions transactions, because they do
         // partition to master HSID lookups in the run() method. When transactions are
@@ -121,7 +122,8 @@ public class MpProcedureTask extends ProcedureTask
                 spName.startsWith("@") &&
                 !spName.startsWith("@AdHoc") &&
                 !spName.startsWith("@LoadMultipartitionTable") &&
-                !spName.equals("@UpdateApplicationCatalog"))
+                !spName.equals("@UpdateApplicationCatalog") &&
+                !spName.equals("@ApplyBinaryLogMP"))
         {
             InitiateResponseMessage errorResp = new InitiateResponseMessage(txn.m_initiationMsg);
             errorResp.setResults(new ClientResponseImpl(ClientResponse.UNEXPECTED_FAILURE,

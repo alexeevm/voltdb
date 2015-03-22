@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -54,7 +54,7 @@ public class SelectSubqueryExpression extends AbstractSubqueryExpression {
      *    SCALAR_SUBQUERY   - SELECT A, (SELECT C...) FROM .... - single row one column
      *    SELECT_SUBQUERY   - WHERE (...) IN (SELECT C1, C2 ...) - multiple rows
      * @param subqueryType
-     * @param subquey The parsed statement
+     * @param subquery The parsed statement
      */
     public SelectSubqueryExpression(ExpressionType type, StmtSubqueryScan subquery) {
         super();
@@ -68,7 +68,6 @@ public class SelectSubqueryExpression extends AbstractSubqueryExpression {
             m_subqueryNodeId = m_subqueryNode.getPlanNodeId();
         }
         m_args = new ArrayList<AbstractExpression>();
-        moveUpTVE();
     }
 
     /**
@@ -80,17 +79,33 @@ public class SelectSubqueryExpression extends AbstractSubqueryExpression {
         setExpressionType(ExpressionType.SELECT_SUBQUERY);
     }
 
-    public StmtSubqueryScan getTable() {
+    public StmtSubqueryScan getSubqueryScan() {
         return m_subquery;
     }
 
-    public AbstractParsedStmt getSubquery() {
-        return (m_subquery != null) ? m_subquery.getSubqueryStmt() : null;
+    public AbstractParsedStmt getSubqueryStmt() {
+        return (m_subquery == null) ? null : m_subquery.getSubqueryStmt();
+    }
+
+    @Override
+    public int getSubqueryId() {
+        return m_subqueryId;
+    }
+
+    @Override
+    public int getSubqueryNodeId() {
+        return m_subqueryNodeId;
+    }
+
+    @Override
+    public AbstractPlanNode getSubqueryNode() {
+        return m_subqueryNode;
     }
 
     /**
      * From JSON
      */
+    @Override
     public void setSubqueryNode(AbstractPlanNode subqueryNode) {
         assert(subqueryNode != null);
         m_subqueryNode = subqueryNode;
@@ -181,9 +196,17 @@ public class SelectSubqueryExpression extends AbstractSubqueryExpression {
             // will be extracted into a separated line from the final explain string
             StringBuilder sb = new StringBuilder();
             m_subqueryNode.explainPlan_recurse(sb, "");
-
             String result = "(" + SUBQUERY_TAG + m_subqueryId + " " + sb.toString()
-                    + SUBQUERY_TAG + m_subqueryId + ")";
+                    + SUBQUERY_TAG + m_subqueryId + "";
+            if (m_args != null && ! m_args.isEmpty()) {
+                String connector = "\n on arguments (";
+                for (AbstractExpression arg : m_args) {
+                    result += connector + arg.explain(impliedTableName);
+                    connector = ", ";
+                }
+                result += ")\n";
+            }
+            result +=")";
             return result;
         } else {
             return "(Subquery: null)";
@@ -191,38 +214,41 @@ public class SelectSubqueryExpression extends AbstractSubqueryExpression {
     }
 
     /**
-     * Traverse down the expression tree identifying all the TVEs which reference the
-     * columns from the parent statement (getOrigStmtId() != parentStmt.subqueryId) and replace them with
-     * the corresponding ParameterValueExpression. Keep the mapping between the original TVE
-     * and new PVE which will be required by the back-end executor.
-     * If a TVE references the grandparent, move it up to be resolved at a higher level.
+     * Resolve the subquery's correlated TVEs (and, in one special case, aggregates)
+     * that became ParameterValueExpressions in the subquery statement (or its children).
+     * If they reference a column from the parent statement (getOrigStmtId() == parentStmt.m_stmtId)
+     * that PVE will have to be initialized by this subquery expression in the back-end executor.
+     * Otherwise, the TVE references a grandparent statement with its own subquery expression,
+     * so just add it to the parent statement's set of correlated TVEs needing to be resolved later
+     * at a higher level.
      */
-    public void moveUpTVE() {
+    public void resolveCorrelations() {
         AbstractParsedStmt subqueryStmt = m_subquery.getSubqueryStmt();
         AbstractParsedStmt parentStmt = subqueryStmt.m_parentStmt;
 
         // we must have a parent - it's a subquery statement
         assert(parentStmt != null);
         // Preserve indexes of all parameters this subquery depends on.
-        // It includes parameters from the child subqueries.
+        // It might include parameters from its nested child subqueries that
+        // the subquery statement could not resolve itself and had to "move up".
         m_allParameterIdxList.addAll(subqueryStmt.m_parameterTveMap.keySet());
         for (Map.Entry<Integer, AbstractExpression> entry : subqueryStmt.m_parameterTveMap.entrySet()) {
             Integer paramIdx = entry.getKey();
             AbstractExpression expr = entry.getValue();
-            if (expr instanceof AggregateExpression) {
-                // Aggregate expression is always from THIS statement
-                m_args.add(expr);
-                m_parameterIdxList.add(paramIdx);
-            } else if (expr instanceof TupleValueExpression) {
+            if (expr instanceof TupleValueExpression) {
                 TupleValueExpression tve = (TupleValueExpression) expr;
                 if(tve.getOrigStmtId() == parentStmt.m_stmtId) {
                     // TVE originates from the statement where this SubqueryExpression belongs to
                     m_args.add(expr);
                     m_parameterIdxList.add(paramIdx);
                 } else {
-                    // TVE originates from the parent. Move it up
+                    // TVE originates from a statement above this parent. Move it up.
                     parentStmt.m_parameterTveMap.put(paramIdx, expr);
                 }
+            } else if (expr instanceof AggregateExpression) {
+                // An aggregate expression is always from THIS parent statement.
+                m_args.add(expr);
+                m_parameterIdxList.add(paramIdx);
             } else {
                 // so far it should be either AggregateExpression or TupleValueExpression types
                 assert(false);

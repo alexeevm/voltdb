@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -75,7 +75,6 @@ public class WriterSubPlanAssembler extends SubPlanAssembler {
             assert(m_parsedStmt.m_noTableSelectionList.size() == 0);
 
             m_generatedPlans = true;
-            assert (m_parsedStmt.m_joinTree != null);
             // This is either UPDATE or DELETE statement. Consolidate all expressions
             // into the WHERE list.
             tableNode.m_whereInnerList.addAll(tableNode.m_joinInnerList);

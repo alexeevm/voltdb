@@ -78,20 +78,6 @@ def buildPro():
 ################################################
 
 def buildRabbitMQExport(version):
-    # Only compile the RabbitMQ connector if version is >= 4.5
-    parts = version.split(".")
-    skip = True
-    try:
-        if len(parts) >= 2 and \
-           int(parts[0]) >= 4 and \
-           int(parts[1][0]) >= 5:
-            skip = False
-    except Exception as e:
-        pass
-
-    if skip:
-        return
-
     with cd(builddir + "/export-rabbitmq"):
         run("pwd")
         run("git status")
@@ -123,6 +109,13 @@ def makeEnterpriseZip():
     with cd(builddir + "/pro"):
         run("VOLTCORE=../voltdb ant -f mmt.xml dist.pro.zip")
 
+################################################
+# MAKE AN JAR FILES NEEDED TO PUSH TO MAVEN
+################################################
+
+def makeMavenJars():
+    with cd(builddir + "/voltdb"):
+        run("VOLTCORE=../voltdb ant -f build-client.xml maven-jars")
 
 ################################################
 # COPY FILES
@@ -133,8 +126,6 @@ def copyCommunityFilesToReleaseDir(releaseDir, version, operatingsys):
         "%s/%s-voltdb-%s.tar.gz" % (releaseDir, operatingsys, version))
     get("%s/voltdb/obj/release/voltdb-client-java-%s.tar.gz" % (builddir, version),
         "%s/voltdb-client-java-%s.tar.gz" % (releaseDir, version))
-    get("%s/voltdb/obj/release/voltdb-studio.web-%s.zip" % (builddir, version),
-        "%s/voltdb-studio.web-%s.zip" % (releaseDir, version))
     get("%s/voltdb/obj/release/voltdb-tools-%s.tar.gz" % (builddir, version),
         "%s/voltdb-tools-%s.tar.gz" % (releaseDir, version))
 
@@ -155,6 +146,24 @@ def copyTrialLicenseToReleaseDir(releaseDir):
 def copyEnterpriseZipToReleaseDir(releaseDir, version, operatingsys):
     get("%s/pro/obj/pro/voltdb-ent-%s.zip" % (builddir, version),
         "%s/%s-voltdb-ent-%s.zip" % (releaseDir, operatingsys, version))
+
+def copyMavenJarsToReleaseDir(releaseDir, version):
+    #The .jars and upload file must be in a directory called voltdb - it is the projectname
+    mavenProjectDir = releaseDir + "/mavenjars/voltdb"
+    if not os.path.exists(mavenProjectDir):
+        os.makedirs(mavenProjectDir)
+
+    #Get the voltdbclient-n.n.jar from the recently built community build
+    get("%s/voltdb/obj/release/dist-client-java/voltdb/voltdbclient-%s.jar" % (builddir, version),
+        "%s/voltdbclient-%s.jar" % (mavenProjectDir, version))
+    #Get the upload.gradle file
+    get("%s/voltdb/tools/kit_tools/upload.gradle" % (builddir),
+        "%s/upload.gradle" % (mavenProjectDir))
+    #Get the src and javadoc .jar files
+    get("%s/voltdb/obj/release/voltdbclient-%s-javadoc.jar" % (builddir, version),
+        "%s/voltdbclient-%s-javadoc.jar" % (mavenProjectDir, version))
+    get("%s/voltdb/obj/release/voltdbclient-%s-sources.jar" % (builddir, version),
+        "%s/voltdbclient-%s-sources.jar" % (mavenProjectDir, version))
 
 ################################################
 # COMPUTE CHECKSUMS
@@ -273,6 +282,9 @@ try:
         if versionHasZipTarget():
             makeEnterpriseZip()
             copyEnterpriseZipToReleaseDir(releaseDir, versionCentos, "LINUX")
+        makeMavenJars()
+        copyMavenJarsToReleaseDir(releaseDir, versionCentos)
+
 except Exception as e:
     print "Coult not build LINUX kit: " + str(e)
     build_errors=True

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -78,11 +78,12 @@ public abstract class StmtTableScan {
 
     abstract public void processTVE(TupleValueExpression expr, String columnName);
 
-    public void resolveTVE(TupleValueExpression expr, String columnName) {
-
+    public void resolveTVE(TupleValueExpression expr) {
+        String columnName = expr.getColumnName();
         processTVE(expr, columnName);
+        expr.setOrigStmtId(m_stmtId);
 
-        if (!m_scanColumnNameSet.contains(columnName)) {
+        if ( ! m_scanColumnNameSet.contains(columnName)) {
             SchemaColumn scol = new SchemaColumn(getTableName(), m_tableAlias,
                     columnName, columnName, (TupleValueExpression) expr.clone());
             m_scanColumnNameSet.add(columnName);

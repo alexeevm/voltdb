@@ -6,7 +6,8 @@ CREATE TABLE R1 (
 CREATE TABLE R2 (
 	A INTEGER NOT NULL,
 	C INTEGER NOT NULL,
-	D INTEGER NOT NULL
+	D INTEGER NOT NULL,
+	E INTEGER NOT NULL
 );
 
 CREATE INDEX A_ON_R2 ON R2(A);
@@ -79,5 +80,19 @@ RATIO FLOAT,
 CONSTRAINT SP4_PK_TREE PRIMARY KEY (ID) ); 
 PARTITION TABLE SP4 ON COLUMN ID;
 
+--- ENG-7770
+CREATE TABLE pgr
+(
+    utc_timestamp bigint,
+    s int not null,
+    count_for_day int
+);
+partition table pgr on column s;
 
+CREATE VIEW user_heat AS
+SELECT s,
+((EXTRACT(HOUR FROM to_timestamp(second, utc_timestamp))*60)) AS hotspot_hm,
+COUNT(*) heat
+FROM pgr
+GROUP BY s, hotspot_hm;
 

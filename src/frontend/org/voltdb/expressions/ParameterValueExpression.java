@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -45,10 +45,20 @@ public class ParameterValueExpression extends AbstractValueExpression {
     // In case of subqueries, TVE from a parent query that is part of a correlated expression
     // is substituted with the PVE within the child. The m_correlatedExpr points back to the
     // original TVE for 'explain' purposes
-    private AbstractExpression m_correlatedExpr = null;
+    private AbstractExpression m_correlatedExpr;
 
     public ParameterValueExpression() {
         super(ExpressionType.VALUE_PARAMETER);
+        m_correlatedExpr = null;
+    }
+
+    public ParameterValueExpression(int nextParamIndex, AbstractExpression expr) {
+        super(ExpressionType.VALUE_PARAMETER);
+        m_paramIndex = nextParamIndex;
+        setValueType(expr.getValueType());
+        setValueSize(expr.getValueSize());
+        setInBytes(expr.getInBytes());
+        m_correlatedExpr = expr;
     }
 
     @Override
@@ -188,6 +198,7 @@ public class ParameterValueExpression extends AbstractValueExpression {
         if (m_valueType != null && m_valueType != VoltType.NUMERIC) {
             return;
         }
+        // BigInt or Float, Decimal is not selected here because of its range is smaller
         VoltType fallbackType = VoltType.FLOAT;
         if (m_originalValue != null) {
             m_originalValue.refineOperandType(VoltType.BIGINT);
@@ -207,16 +218,16 @@ public class ParameterValueExpression extends AbstractValueExpression {
         setValueSize(m_originalValue.getValueSize());
     }
 
-    public void setCorrelatedExpression(AbstractExpression expr) {
-        m_correlatedExpr = expr;
-    }
-
     public ConstantValueExpression getOriginalValue() {
         return m_originalValue;
     }
 
-    public AbstractExpression getCorrealtedExpression() {
+    public AbstractExpression getCorrelatedExpression() {
         return m_correlatedExpr;
+    }
+
+    public void setCorrelatedExpression(AbstractExpression correlatedExpr) {
+        m_correlatedExpr = correlatedExpr;
     }
 
     // Return this parameter in a list of bound parameters if the expr argument is in fact

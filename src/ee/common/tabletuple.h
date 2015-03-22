@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -737,7 +737,7 @@ inline void TableTuple::deserializeFromDR(voltdb::SerializeInputLE &tupleIn,  Po
             setNValue(j, value);
         } else {
             char *dataPtr = getWritableDataPtr(columnInfo);
-            NValue::deserializeFrom<TUPLE_SERIALIZATION_NATIVE, BYTE_ORDER_LITTLE_ENDIAN>(
+            NValue::deserializeFrom<TUPLE_SERIALIZATION_DR, BYTE_ORDER_LITTLE_ENDIAN>(
                     tupleIn, dataPool, dataPtr,
                     columnInfo->getVoltType(), columnInfo->inlined,
                     static_cast<int32_t>(columnInfo->length), columnInfo->inBytes);

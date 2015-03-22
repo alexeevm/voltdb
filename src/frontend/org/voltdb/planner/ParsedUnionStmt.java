@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -27,7 +27,6 @@ import org.voltdb.expressions.ComparisonExpression;
 import org.voltdb.expressions.ConjunctionExpression;
 import org.voltdb.expressions.SelectSubqueryExpression;
 import org.voltdb.planner.parseinfo.StmtSubqueryScan;
-import org.voltdb.planner.parseinfo.StmtTableScan;
 import org.voltdb.types.ExpressionType;
 
 public class ParsedUnionStmt extends AbstractParsedStmt {
@@ -203,7 +202,7 @@ public class ParsedUnionStmt extends AbstractParsedStmt {
         if (subqueryExpr == null) {
             return expr;
         }
-        AbstractParsedStmt subquery = subqueryExpr.getSubquery();
+        AbstractParsedStmt subquery = subqueryExpr.getSubqueryStmt();
         if (!(subquery instanceof ParsedUnionStmt)) {
             return expr;
         }
@@ -224,12 +223,11 @@ public class ParsedUnionStmt extends AbstractParsedStmt {
         // It's a subquery which means it must have a parent
         assert (parentStmt != null);
         for (AbstractParsedStmt child : setOpStmt.m_children) {
-            String tableName = "VOLT_TEMP_TABLE_" + child.m_stmtId;
             // add table to the query cache
-            StmtTableScan tableCache = parentStmt.addTableToStmtCache(tableName, tableName, child);
-            assert(tableCache instanceof StmtSubqueryScan);
+            String withoutAlias = null;
+            StmtSubqueryScan tableCache = parentStmt.addSubqueryToStmtCache(child, withoutAlias);
             AbstractExpression childSubqueryExpr =
-                    new SelectSubqueryExpression(subqueryExpr.getExpressionType(), (StmtSubqueryScan)tableCache);
+                    new SelectSubqueryExpression(subqueryExpr.getExpressionType(), tableCache);
             AbstractExpression newExpr = null;
             try {
                 newExpr = expr.getExpressionType().getExpressionClass().newInstance();

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -108,9 +108,15 @@ PlanNodeFragment::createFromCatalog(const string value)
     //cout << "DEBUG PlanNodeFragment::createFromCatalog: value == " << value << endl;
 
     PlannerDomRoot domRoot(value.c_str());
-
-    PlanNodeFragment *retval = PlanNodeFragment::fromJSONObject(domRoot.rootObject());
-    return retval;
+    try {
+        PlanNodeFragment *retval = PlanNodeFragment::fromJSONObject(domRoot.rootObject());
+        return retval;
+    }
+    catch (UnexpectedEEException& ue) {
+        string prefix("\ncreateFromCatalog:\n");
+        ue.appendContextToMessage(prefix + value);
+        throw;
+    }
 }
 
 PlanNodeFragment *

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -46,6 +46,7 @@ class NValueTest : public Test {
     ThreadLocalPool m_pool;
     boost::scoped_ptr<Pool> m_testPool;
     boost::scoped_ptr<ExecutorContext> m_executorContext;
+    static PlannerDomRoot m_emptyRoot;
 
 public:
     string str;
@@ -57,6 +58,8 @@ public:
     NValue viaDouble;
     NValue lower;
     NValue upper;
+
+    static PlannerDomValue emptyDom() { return m_emptyRoot.rootObject(); }
 
     void deserDecHelper()
     {
@@ -80,15 +83,19 @@ public:
         scaledDirect = (int64_t)(floatDirect * scale);
     }
 
-    ExecutorContext * getExecutorContextForTest(Pool* testPool) {
+    ExecutorContext * getExecutorContextForTest(Pool* testPool)
+    {
         m_testPool.reset(testPool);
-        ExecutorContext *newExec = new ExecutorContext(0, 0,
-                NULL, NULL, testPool, NULL, NULL, false, "", 0, NULL);
+        ExecutorContext *newExec = new ExecutorContext(0, 0, NULL, NULL, testPool,
+                                                       (NValueArray*)NULL, (VoltDBEngine*)NULL,
+                                                       "", 0, NULL, NULL);
         m_executorContext.reset(newExec);
         return m_executorContext.get();
     }
 
 };
+// An empty JSON object to get simple (non-quantified) behavior from comparators
+PlannerDomRoot NValueTest::m_emptyRoot("{}");
 
 TEST_F(NValueTest, DeserializeDecimal)
 {
@@ -2391,14 +2398,14 @@ TEST_F(NValueTest, TestInList)
            ExpressionUtil::vectorFactory(VALUE_TYPE_INTEGER, int_constants_rhs2);
 
         in_expression =
-            ExpressionUtil::comparisonFactory(EXPRESSION_TYPE_COMPARE_IN,
+            ExpressionUtil::comparisonFactory(emptyDom(), EXPRESSION_TYPE_COMPARE_IN,
                                               int_constants_lhs1_1[kk],
                                               in_list_of_int_constants1);
         EXPECT_TRUE(in_expression->eval(NULL, NULL).isTrue());
         delete in_expression;
 
         in_expression =
-            ExpressionUtil::comparisonFactory(EXPRESSION_TYPE_COMPARE_IN,
+            ExpressionUtil::comparisonFactory(emptyDom(), EXPRESSION_TYPE_COMPARE_IN,
                                               int_constants_lhs1_2[kk],
                                               in_list_of_int_constants2);
         EXPECT_FALSE(in_expression->eval(NULL, NULL).isTrue());
@@ -2418,14 +2425,14 @@ TEST_F(NValueTest, TestInList)
            ExpressionUtil::vectorFactory(VALUE_TYPE_INTEGER, int_constants_rhs2);
 
         in_expression =
-            ExpressionUtil::comparisonFactory(EXPRESSION_TYPE_COMPARE_IN,
+            ExpressionUtil::comparisonFactory(emptyDom(), EXPRESSION_TYPE_COMPARE_IN,
                                               int_constants_lhs2_1[ll],
                                               in_list_of_int_constants2);
         EXPECT_TRUE(in_expression->eval(NULL, NULL).isTrue());
         delete in_expression;
 
         in_expression =
-            ExpressionUtil::comparisonFactory(EXPRESSION_TYPE_COMPARE_IN,
+            ExpressionUtil::comparisonFactory(emptyDom(), EXPRESSION_TYPE_COMPARE_IN,
                                               int_constants_lhs2_2[ll],
                                               in_list_of_int_constants1);
         EXPECT_FALSE(in_expression->eval(NULL, NULL).isTrue());
@@ -2484,14 +2491,14 @@ TEST_F(NValueTest, TestInList)
            ExpressionUtil::vectorFactory(VALUE_TYPE_VARCHAR, string_constants_rhs2);
 
         in_expression =
-            ExpressionUtil::comparisonFactory(EXPRESSION_TYPE_COMPARE_IN,
+            ExpressionUtil::comparisonFactory(emptyDom(), EXPRESSION_TYPE_COMPARE_IN,
                                               string_constants_lhs1_1[kk],
                                               in_list_of_string_constants1);
         EXPECT_TRUE(in_expression->eval(NULL, NULL).isTrue());
         delete in_expression;
 
         in_expression =
-            ExpressionUtil::comparisonFactory(EXPRESSION_TYPE_COMPARE_IN,
+            ExpressionUtil::comparisonFactory(emptyDom(), EXPRESSION_TYPE_COMPARE_IN,
                                               string_constants_lhs1_2[kk],
                                               in_list_of_string_constants2);
         EXPECT_FALSE(in_expression->eval(NULL, NULL).isTrue());
@@ -2511,14 +2518,14 @@ TEST_F(NValueTest, TestInList)
            ExpressionUtil::vectorFactory(VALUE_TYPE_VARCHAR, string_constants_rhs2);
 
         in_expression =
-            ExpressionUtil::comparisonFactory(EXPRESSION_TYPE_COMPARE_IN,
+            ExpressionUtil::comparisonFactory(emptyDom(), EXPRESSION_TYPE_COMPARE_IN,
                                               string_constants_lhs2_1[ll],
                                               in_list_of_string_constants2);
         EXPECT_TRUE(in_expression->eval(NULL, NULL).isTrue());
         delete in_expression;
 
         in_expression =
-            ExpressionUtil::comparisonFactory(EXPRESSION_TYPE_COMPARE_IN,
+            ExpressionUtil::comparisonFactory(emptyDom(), EXPRESSION_TYPE_COMPARE_IN,
                                               string_constants_lhs2_2[ll],
                                               in_list_of_string_constants1);
         EXPECT_FALSE(in_expression->eval(NULL, NULL).isTrue());

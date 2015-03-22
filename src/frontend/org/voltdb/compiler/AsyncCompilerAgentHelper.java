@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -29,7 +29,6 @@ import org.voltdb.catalog.CatalogDiffEngine;
 import org.voltdb.common.Constants;
 import org.voltdb.compiler.ClassMatcher.ClassNameMatchStatus;
 import org.voltdb.utils.CatalogUtil;
-import org.voltdb.utils.CatalogUtil.CatalogAndIds;
 import org.voltdb.utils.Encoder;
 import org.voltdb.utils.InMemoryJarfile;
 
@@ -48,6 +47,7 @@ public class AsyncCompilerAgentHelper
         retval.invocationType = work.invocationType;
         retval.originalTxnId = work.originalTxnId;
         retval.originalUniqueId = work.originalUniqueId;
+        retval.user = work.user;
         retval.tablesThatMustBeEmpty = new String[0]; // ensure non-null
 
         try {
@@ -105,12 +105,12 @@ public class AsyncCompilerAgentHelper
                 // newCatalogBytes and deploymentString should be null.
                 // work.adhocDDLStmts should be applied to the current catalog
                 try {
-                    newCatalogBytes = addDDLToCatalog(context.getCatalogJarBytes(),
+                    newCatalogBytes = addDDLToCatalog(context.catalog, context.getCatalogJarBytes(),
                             work.adhocDDLStmts);
                 }
                 catch (IOException ioe) {
                     retval.errorMsg = "Unexpected exception applying DDL statements to " +
-                        " original catalog: " + ioe.getMessage();
+                        "original catalog: " + ioe.getMessage();
                     return retval;
                 }
                 if (newCatalogBytes == null) {
@@ -128,8 +128,6 @@ public class AsyncCompilerAgentHelper
                     work.invocationName;
                 return retval;
             }
-            retval.catalogBytes = newCatalogBytes;
-            retval.catalogHash = CatalogUtil.makeCatalogOrDeploymentHash(newCatalogBytes);
 
             // get the diff between catalogs
             // try to get the new catalog from the params
@@ -143,6 +141,9 @@ public class AsyncCompilerAgentHelper
                 retval.errorMsg = ioe.getMessage();
                 return retval;
             }
+            newCatalogBytes = loadResults.getFirst().getFullJarBytes();
+            retval.catalogBytes = newCatalogBytes;
+            retval.catalogHash = loadResults.getFirst().getSha1Hash();
             String newCatalogCommands =
                 CatalogUtil.getSerializedCatalogStringFromJar(loadResults.getFirst());
             retval.upgradedFromVersion = loadResults.getSecond();
@@ -155,12 +156,10 @@ public class AsyncCompilerAgentHelper
 
             // Retrieve the original deployment string, if necessary
             if (deploymentString == null) {
-                // Go get the deployment string from ZK.  Hope it's there and up-to-date.  Yeehaw!
-                CatalogAndIds catalogStuff =
-                    CatalogUtil.getCatalogFromZK(VoltDB.instance().getHostMessenger().getZK());
-                byte[] deploymentBytes = catalogStuff.deploymentBytes;
+                // Go get the deployment string from the current catalog context
+                byte[] deploymentBytes = context.getDeploymentBytes();
                 if (deploymentBytes != null) {
-                    deploymentString = new String(deploymentBytes, "UTF-8");
+                    deploymentString = new String(deploymentBytes, Constants.UTF8ENCODING);
                 }
                 if (deploymentBytes == null || deploymentString == null) {
                     retval.errorMsg = "No deployment file provided and unable to recover previous " +
@@ -169,15 +168,16 @@ public class AsyncCompilerAgentHelper
                 }
             }
 
-            long result = CatalogUtil.compileDeploymentString(newCatalog, deploymentString, false, false);
-            if (result < 0) {
-                retval.errorMsg = "Unable to read from deployment file string";
+            String result =
+                CatalogUtil.compileDeploymentString(newCatalog, deploymentString, false);
+            if (result != null) {
+                retval.errorMsg = "Unable to update deployment configuration: " + result;
                 return retval;
             }
 
             retval.deploymentString = deploymentString;
             retval.deploymentHash =
-                CatalogUtil.makeCatalogOrDeploymentHash(deploymentString.getBytes("UTF-8"));
+                CatalogUtil.makeDeploymentHash(deploymentString.getBytes(Constants.UTF8ENCODING));
 
             // store the version of the catalog the diffs were created against.
             // verified when / if the update procedure runs in order to verify
@@ -213,34 +213,25 @@ public class AsyncCompilerAgentHelper
      * Append the supplied adhoc DDL to the current catalog's DDL and recompile the
      * jarfile
      */
-    private byte[] addDDLToCatalog(byte[] oldCatalogBytes, String[] adhocDDLStmts)
+    private byte[] addDDLToCatalog(Catalog oldCatalog, byte[] oldCatalogBytes, String[] adhocDDLStmts)
     throws IOException
     {
         VoltCompilerReader ddlReader = null;
         try {
             InMemoryJarfile jarfile = CatalogUtil.loadInMemoryJarFile(oldCatalogBytes);
-            // Yoink the current cluster catalog's canonical DDL and append the supplied
-            // adhoc DDL to it.
-            String oldDDL = new String(jarfile.get(VoltCompiler.AUTOGEN_DDL_FILE_NAME),
-                    Constants.UTF8ENCODING);
-            compilerLog.debug("OLD DDL: " + oldDDL);
+
             StringBuilder sb = new StringBuilder();
-            sb.append(oldDDL);
-            sb.append("\n");
+            compilerLog.info("Applying the following DDL to cluster:");
             for (String stmt : adhocDDLStmts) {
+                compilerLog.info("\t" + stmt);
                 sb.append(stmt);
                 sb.append(";\n");
             }
-            compilerLog.debug("Adhoc-modified DDL:\n" + sb.toString());
-            // Put the new DDL back into the InMemoryJarfile we built because that's
-            // the artifact the compiler is expecting to work on.  This allows us to preserve any
-            // stored procedure classes and the class loader that came with the catalog
-            // before we appended to it.
-            ddlReader =
-                new VoltCompilerStringReader(VoltCompiler.AUTOGEN_DDL_FILE_NAME, sb.toString());
-            ddlReader.putInJar(jarfile, VoltCompiler.AUTOGEN_DDL_FILE_NAME);
+            String newDDL = sb.toString();
+            compilerLog.trace("Adhoc-modified DDL:\n" + newDDL);
+
             VoltCompiler compiler = new VoltCompiler();
-            compiler.compileInMemoryJarfile(jarfile);
+            compiler.compileInMemoryJarfileWithNewDDL(jarfile, newDDL, oldCatalog);
             return jarfile.getFullJarBytes();
         }
         finally {
@@ -293,6 +284,7 @@ public class AsyncCompilerAgentHelper
             }
         }
         if (deletedClasses || foundClasses) {
+            compilerLog.info("Updating java classes available to stored procedures");
             VoltCompiler compiler = new VoltCompiler();
             compiler.compileInMemoryJarfile(jarfile);
         }

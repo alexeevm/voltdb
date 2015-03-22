@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2014 VoltDB Inc.
+ * Copyright (C) 2008-2015 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -44,6 +44,13 @@ SerializableEEException::SerializableEEException(VoltEEExceptionType exceptionTy
 {
     VOLT_DEBUG("Created SerializableEEException: type: %s message: %s",
                translateVoltEEExceptionTypeToString(exceptionType), message.c_str());
+}
+
+SerializableEEException::SerializableEEException(std::string message) :
+    m_exceptionType(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION), m_message(message)
+{
+    VOLT_DEBUG("Created SerializableEEException: default type, %s",
+               message.c_str());
 }
 
 void SerializableEEException::serialize(ReferenceSerializeOutput *output) const {
