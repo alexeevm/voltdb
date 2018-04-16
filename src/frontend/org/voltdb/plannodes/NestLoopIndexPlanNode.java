@@ -65,9 +65,8 @@ public class NestLoopIndexPlanNode extends AbstractJoinPlanNode {
         // Note that the inner table's contribution to the join_tuple doesn't include
         // all the columns from the inner table---just the ones needed as determined by
         // the inlined scan's own inlined projection, as described above.
-        m_outputSchemaPreInlineAgg =
-            m_children.get(0).getOutputSchema().
-            join(inlineScan.getOutputSchema()).copyAndReplaceWithTVE();
+        setOutputSchemaPreInlineAgg(m_children.get(0).getOutputSchema().
+        join(inlineScan.getOutputSchema()).copyAndReplaceWithTVE());
         m_hasSignificantOutputSchema = true;
 
         generateRealOutputSchema(db);

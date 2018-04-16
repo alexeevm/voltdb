@@ -168,12 +168,19 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode implements I
         }
 
         // Join the schema together to form the output schema
-        m_outputSchemaPreInlineAgg =
-            m_children.get(0).getOutputSchema().
-            join(m_children.get(1).getOutputSchema()).copyAndReplaceWithTVE();
+        setOutputSchemaPreInlineAgg(m_children.get(0).getOutputSchema().
+        join(m_children.get(1).getOutputSchema()).copyAndReplaceWithTVE());
         m_hasSignificantOutputSchema = true;
 
         generateRealOutputSchema(db);
+    }
+
+    public void setOutputSchemaPreInlineAgg(NodeSchema schema) {
+        m_outputSchemaPreInlineAgg = schema;
+    }
+
+    NodeSchema getOutputSchemaPreInlineAgg() {
+        return m_outputSchemaPreInlineAgg;
     }
 
     protected void generateRealOutputSchema(Database db) {
@@ -244,8 +251,8 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode implements I
         // and further ordered by TVE index within the left- and righthand sides.
         // generateOutputSchema already places outer columns on the left and inner on the right,
         // so we just need to order the left- and righthand sides by TVE index separately.
-        m_outputSchemaPreInlineAgg.sortByTveIndex(0, outer_schema.size());
-        m_outputSchemaPreInlineAgg.sortByTveIndex(outer_schema.size(), m_outputSchemaPreInlineAgg.size());
+        getOutputSchemaPreInlineAgg().sortByTveIndex(0, outer_schema.size());
+        getOutputSchemaPreInlineAgg().sortByTveIndex(outer_schema.size(), getOutputSchemaPreInlineAgg().size());
         m_hasSignificantOutputSchema = true;
 
         resolveRealOutputSchema();
@@ -304,7 +311,7 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode implements I
         stringer.key(Members.JOIN_PREDICATE.name()).value(m_joinPredicate);
         stringer.key(Members.WHERE_PREDICATE.name()).value(m_wherePredicate);
 
-        if (m_outputSchemaPreInlineAgg != m_outputSchema) {
+        if (getOutputSchemaPreInlineAgg() != getOutputSchema()) {
             stringer.key(Members.OUTPUT_SCHEMA_PRE_AGG.name());
             stringer.array();
             for (int colNo = 0; colNo < m_outputSchemaPreInlineAgg.size(); colNo += 1) {

@@ -52,7 +52,7 @@ import org.voltdb.VoltType;
 public class FunctionForVoltDB extends FunctionSQL {
     private static final VoltLogger m_logger = new VoltLogger("UDF");
 
-    static class FunctionDescriptor {
+    public static class FunctionDescriptor {
         final private String m_name;
         final private int m_id;
         final private Type m_type;
@@ -508,6 +508,10 @@ public class FunctionForVoltDB extends FunctionSQL {
         }
         FunctionSQL function = new FunctionForVoltDB(def);
         return function;
+    }
+
+    public static FunctionDescriptor newVoltDBFunctionId(String token) {
+       return FunctionDescriptor.fn_by_name(token);
     }
 
     public FunctionForVoltDB(FunctionDescriptor fn) {

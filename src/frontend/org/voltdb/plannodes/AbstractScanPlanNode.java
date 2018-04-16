@@ -464,7 +464,7 @@ public abstract class AbstractScanPlanNode extends AbstractPlanNode {
                 TupleValueExpression tve = (TupleValueExpression) colExpr;
                 tve.setColumnIndexUsingSchema(m_tableSchema);
             }
-            m_outputSchema.sortByTveIndex();
+            getOutputSchema().sortByTveIndex();
         }
 
         // The outputschema of an inline limit node is completely irrelevant to the EE except that

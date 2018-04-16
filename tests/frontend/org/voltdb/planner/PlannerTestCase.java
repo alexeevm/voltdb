@@ -45,6 +45,7 @@ import org.voltdb.plannodes.SeqScanPlanNode;
 import org.voltdb.types.ExpressionType;
 import org.voltdb.types.JoinType;
 import org.voltdb.types.PlanNodeType;
+import org.voltdb.types.PlannerType;
 import org.voltdb.types.SortDirectionType;
 
 import junit.framework.TestCase;
@@ -76,10 +77,10 @@ public class PlannerTestCase extends TestCase {
         return paramCount;
     }
 
-    protected void failToCompile(String sql, String... patterns) {
+    protected void failToCompile(PlannerType plannerType, String sql, String... patterns) {
         int paramCount = countQuestionMarks(sql);
         try {
-            List<AbstractPlanNode> unexpected = m_aide.compile(sql, paramCount,
+            List<AbstractPlanNode> unexpected = m_aide.compile(plannerType, sql, paramCount,
                     m_byDefaultInferPartitioning, m_byDefaultPlanForSinglePartition, null);
             printExplainPlan(unexpected);
             fail("Expected planner failure, but found success.");
@@ -94,6 +95,10 @@ public class PlannerTestCase extends TestCase {
         }
     }
 
+    protected void failToCompile(String sql, String... patterns) {
+        failToCompile(PlannerType.VOLTDB, sql, patterns);
+    }
+
     protected CompiledPlan compileAdHocPlan(String sql) {
         return compileAdHocPlan(sql, DeterminismMode.SAFER);
     }
@@ -101,7 +106,7 @@ public class PlannerTestCase extends TestCase {
     protected CompiledPlan compileAdHocPlan(String sql, DeterminismMode detMode) {
         CompiledPlan cp = null;
         try {
-            cp = m_aide.compileAdHocPlan(sql, detMode);
+            cp = m_aide.compileAdHocPlan(PlannerType.VOLTDB, sql, detMode);
             assertTrue(cp != null);
         }
         catch (Exception ex) {
@@ -129,7 +134,7 @@ public class PlannerTestCase extends TestCase {
                                             DeterminismMode detMode) {
         CompiledPlan cp = null;
         try {
-            cp = m_aide.compileAdHocPlan(sql, inferPartitioning, forcedSP, detMode);
+            cp = m_aide.compileAdHocPlan(PlannerType.VOLTDB, sql, inferPartitioning, forcedSP, detMode);
             assertTrue(cp != null);
         }
         catch (Exception ex) {
@@ -137,6 +142,35 @@ public class PlannerTestCase extends TestCase {
             fail();
         }
         return cp;
+    }
+
+    protected CompiledPlan compileAdHocCalcitePlan(String sql,
+            boolean inferPartitioning,
+            boolean forcedSP,
+            DeterminismMode detMode) {
+        CompiledPlan cp = null;
+        try {
+            cp = m_aide.compileAdHocPlan(PlannerType.CALCITE, sql, inferPartitioning, forcedSP, detMode);
+            assertTrue(cp != null);
+        }
+        catch (Exception ex) {
+            ex.printStackTrace();
+            fail();
+        }
+        return cp;
+    }
+
+    /**
+     * Used by the TestCalciteBase to compile a plan using the VoltDB Planner
+     * @param sql
+     * @param inferPartitioning
+     * @param forcedSP
+     * @return
+     */
+    protected CompiledPlan compileAdHocPlan(String sql,
+                                            boolean inferPartitioning,
+                                            boolean forcedSP) {
+        return compileAdHocPlan(sql, inferPartitioning, forcedSP, DeterminismMode.SAFER);
     }
 
     /**
@@ -155,7 +189,7 @@ public class PlannerTestCase extends TestCase {
                                                     boolean forcedSP,
                                                     DeterminismMode detMode) {
         CompiledPlan cp = null;
-        cp = m_aide.compileAdHocPlan(sql, inferPartitioning, forcedSP, detMode);
+        cp = compileAdHocPlan(sql, inferPartitioning, forcedSP, detMode);
         assertTrue(cp != null);
         return cp;
     }
@@ -207,7 +241,7 @@ public class PlannerTestCase extends TestCase {
                                                                    boolean planForSinglePartition,
                                                                    String joinOrder) {
         //* enable to debug */ System.out.println("DEBUG: compileWithJoinOrderToFragments(\"" + sql + "\", " + planForSinglePartition + ", \"" + joinOrder + "\")");
-        List<AbstractPlanNode> pn = m_aide.compile(sql, paramCount, m_byDefaultInferPartitioning, m_byDefaultPlanForSinglePartition, joinOrder);
+        List<AbstractPlanNode> pn = m_aide.compile(PlannerType.VOLTDB, sql, paramCount, m_byDefaultInferPartitioning, m_byDefaultPlanForSinglePartition, joinOrder);
         assertTrue(pn != null);
         assertFalse(pn.isEmpty());
         assertTrue(pn.get(0) != null);
@@ -350,7 +384,7 @@ public class PlannerTestCase extends TestCase {
         return m_aide.getCatalog();
     }
 
-    Database getDatabase() {
+    protected Database getDatabase() {
         return m_aide.getDatabase();
     }
 

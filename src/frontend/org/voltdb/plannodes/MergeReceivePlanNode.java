@@ -88,7 +88,7 @@ public class MergeReceivePlanNode extends AbstractReceivePlanNode {
     @Override
     public void toJSONString(JSONStringer stringer) throws JSONException {
         super.toJSONString(stringer);
-        if (m_outputSchemaPreInlineAgg != m_outputSchema) {
+        if (m_outputSchemaPreInlineAgg != getOutputSchema()) {
             stringer.key(Members.OUTPUT_SCHEMA_PRE_AGG.name());
             stringer.array();
             for (int colNo = 0; colNo < m_outputSchemaPreInlineAgg.size(); colNo += 1) {

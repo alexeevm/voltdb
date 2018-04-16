@@ -99,6 +99,7 @@ public abstract class StatementCompiler {
             Statement catalogStmt, VoltXMLElement xml, String stmt, String joinOrder,
             DeterminismMode detMode, StatementPartitioning partitioning)
     throws VoltCompiler.VoltCompilerException {
+        assert (xml == null);
 
         // Cleanup whitespace newlines for catalog compatibility
         // and to make statement parsing easier.
@@ -214,6 +215,8 @@ public abstract class StatementCompiler {
                     planner.parse();
                 }
 
+                //@TODO DML statements are not supported by Calcite yet
+                //plan = planner.planUsingCalcite();
                 plan = planner.plan();
                 assert(plan != null);
             }
@@ -455,7 +458,8 @@ public abstract class StatementCompiler {
             DeterminismMode detMode, StatementPartitioning partitioning)
     throws VoltCompiler.VoltCompilerException {
         return compileStatementAndUpdateCatalog(compiler, hsql, db, estimates, catalogStmt,
-                null, sqlText, joinOrder, detMode, partitioning);
+                null, // VoltXML
+                sqlText, joinOrder, detMode, partitioning);
     }
 
     /**

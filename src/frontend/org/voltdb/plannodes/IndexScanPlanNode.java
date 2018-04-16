@@ -137,6 +137,14 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
         setCatalogIndex(index);
     }
 
+    public IndexScanPlanNode(String tableName, String tableAlias, Index index) {
+        super();
+        setTargetTableName(tableName);
+        setTargetTableAlias(tableAlias);
+
+        setCatalogIndex(index);
+    }
+
     public IndexScanPlanNode(AbstractScanPlanNode srcNode, AggregatePlanNode apn, Index index, SortDirectionType sortDirection) {
         super(srcNode.m_targetTableName, srcNode.m_targetTableAlias);
         m_tableSchema = srcNode.m_tableSchema;
@@ -151,7 +159,7 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
         m_lookupType = IndexLookupType.GTE;    // a safe way
         m_sortDirection = sortDirection;
         if (apn != null) {
-            m_outputSchema = apn.m_outputSchema.clone();
+            m_outputSchema = apn.getOutputSchema().clone();
         }
         m_tableScan = srcNode.getTableScan();
     }
