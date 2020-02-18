@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -31,7 +31,7 @@ import com.google_voltpatches.common.cache.CacheBuilder;
  */
 public final class Catalog extends CatalogType {
 
-    private Cache<String, CatalogType> m_pathCache = CacheBuilder.newBuilder().maximumSize(8).build();
+    Cache<String, CatalogType> m_pathCache = CacheBuilder.newBuilder().maximumSize(8).build();
 
     CatalogMap<Cluster> m_clusters;
 
@@ -78,6 +78,10 @@ public final class Catalog extends CatalogType {
      */
     public void execute(final String commands) {
         m_operator.execute(commands);
+    }
+
+    public void parse(final String schema) {
+        m_operator.parse(schema);
     }
 
     /**
@@ -152,12 +156,14 @@ public final class Catalog extends CatalogType {
     @Override
     public boolean equals(Object obj) {
         // this isn't really the convention for null handling
-        if ((obj == null) || (obj.getClass().equals(getClass()) == false))
+        if ((obj == null) || (obj.getClass().equals(getClass()) == false)) {
             return false;
+        }
 
         // Do the identity check
-        if (obj == this)
+        if (obj == this) {
             return true;
+        }
 
         // this is safe because of the class check
         // it is also known that the childCollections var will be the same
@@ -165,8 +171,12 @@ public final class Catalog extends CatalogType {
         Catalog other = (Catalog) obj;
 
         // are the fields / children the same? (deep compare)
-        if ((m_clusters == null) != (other.m_clusters == null)) return false;
-        if ((m_clusters != null) && !m_clusters.equals(other.m_clusters)) return false;
+        if ((m_clusters == null) != (other.m_clusters == null)) {
+            return false;
+        }
+        if ((m_clusters != null) && !m_clusters.equals(other.m_clusters)) {
+            return false;
+        }
 
         return true;
     }

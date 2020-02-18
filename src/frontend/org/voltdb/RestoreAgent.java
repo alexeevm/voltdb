@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -261,7 +261,6 @@ SnapshotCompletionInterest, Promotable
         public final Set<String> fileTables = new HashSet<String>();
         public final SnapshotPathType pathType;
         public final JSONObject elasticOperationMetadata;
-
 
         public void setPidToTxnIdMap(Map<Integer,Long> map) {
             partitionToTxnId.putAll(map);
@@ -670,14 +669,15 @@ SnapshotCompletionInterest, Promotable
                     for (Integer cmdpart : cmdlogmap.keySet()) {
                         Long snaptxnId = snapmap.get(cmdpart);
                         if (snaptxnId == null) {
-                            m_snapshotErrLogStr.append("\nRejected snapshot ")
-                                            .append(info.nonce)
-                                            .append(" due to missing partition: ")
-                                            .append(cmdpart);
-                            info = null;
-                            break;
-                        }
-                        else if (snaptxnId < cmdlogmap.get(cmdpart)) {
+                            if (!e.getMissingPartitions().contains(cmdpart)) {
+                                m_snapshotErrLogStr.append("\nRejected snapshot ")
+                                .append(info.nonce)
+                                .append(" due to missing partition: ")
+                                .append(cmdpart);
+                                info = null;
+                                break;
+                            }
+                        } else if (snaptxnId < cmdlogmap.get(cmdpart)) {
                             m_snapshotErrLogStr.append("\nRejected snapshot ")
                                             .append(info.nonce)
                                             .append(" because it does not overlap the command log")
@@ -693,7 +693,6 @@ SnapshotCompletionInterest, Promotable
                     }
                 }
             }
-
 
             if (info != null) {
                 snapshotInfos.add(info);

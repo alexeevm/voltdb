@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -40,6 +40,10 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
 
 import org.junit.After;
 import org.junit.Before;
@@ -257,6 +261,49 @@ public class TestPersistentBinaryDeque {
             readCount++;
         }
         assertEquals(count, readCount);
+    }
+
+    @Test
+    public void testReopenReaderMultiSegment() throws Exception {
+        System.out.println("Running testReopenReaderMultiSegment");
+
+        // ENG-18635: verify that last cursor closing does not purge PBD segments
+        commonReopenReaderMultiSegment(150, 150, false);
+    }
+
+    @Test
+    public void testReopenReaderMultiSegmentDR() throws Exception {
+        System.out.println("Running testReopenReaderMultiSegment");
+
+        // ENG-18635: verify that last cursor closing does purge PBD segments for DR
+        commonReopenReaderMultiSegment(150, 9, true);
+    }
+
+    private void commonReopenReaderMultiSegment(int initialCount, int finalCount, boolean purgeOnLastCursor)
+            throws IOException {
+        List<File> listing = getSortedDirectoryListing();
+        assertEquals(listing.size(), 1);
+
+        for (int ii = 0; ii < initialCount; ii++) {
+            m_pbd.offer( DBBPool.wrapBB(getFilledBuffer(ii)) );
+        }
+
+        listing = getSortedDirectoryListing();
+        assertEquals(listing.size(), 4);
+
+        // Open and close a read cursor
+        BinaryDequeReader<ExtraHeaderMetadata> reader = m_pbd.openForRead(CURSOR_ID);
+        m_pbd.closeCursor(CURSOR_ID, purgeOnLastCursor);
+
+        // Verify behavior on last closing cursor
+        reader = m_pbd.openForRead(CURSOR_ID);
+        int readCount = 0;
+        BBContainer cont;
+        while((cont = reader.poll(PersistentBinaryDeque.UNSAFE_CONTAINER_FACTORY)) != null) {
+            cont.discard();
+            readCount++;
+        }
+        assertEquals(readCount, finalCount);
     }
 
     @Test
@@ -943,6 +990,107 @@ public class TestPersistentBinaryDeque {
     }
 
     @Test
+    public void testDeferredDiscards() throws Exception {
+        // Set up deferred discarder
+        Timer timer = new Timer();
+        DeferredDiscarder discarder = new DeferredDiscarder();
+        long timerPeriod = 500;
+        timer.schedule(discarder, timerPeriod, timerPeriod);
+        m_pbd.registerDeferredDeleter(discarder);
+
+        // Insert and read buffers. Verify that the discards happen by verifying the segment count
+        int numSegments = 5;
+        int numBuffers = 25;
+        for (int i=0; i<numSegments; i++) {
+            if (i > 0) {
+                m_pbd.updateExtraHeader(null);
+            }
+            for (int j=0; j<numBuffers; j++) {
+                m_pbd.offer(DBBPool.wrapBB(ByteBuffer.allocate(100)));
+            }
+        }
+
+        assertEquals(numSegments, getSortedDirectoryListing().size());
+
+        BinaryDequeReader<ExtraHeaderMetadata> reader = m_pbd.openForRead("testreader");
+        for (int i=0; i<numSegments; i++) {
+            for (int j=0; j<numBuffers; j++) {
+                reader.poll(PersistentBinaryDeque.UNSAFE_CONTAINER_FACTORY).discard();
+                if (i>0 && j==0) { // deletes happen on the first discard on the next segment.
+                    Thread.sleep(timerPeriod*2); // sleep double the time to make sure the timer task is executed.
+                    assertEquals(numSegments-i, getSortedDirectoryListing().size());
+                }
+            }
+        }
+
+        assertEquals(1, getSortedDirectoryListing().size());
+        assertNull(discarder.m_error);
+        discarder.cancel();
+    }
+
+    @Test
+    public void testDeferredDiscardsAfterClose() throws Exception {
+        // Set up deferred discarder
+        Timer timer = new Timer();
+        DeferredDiscarder discarder = new DeferredDiscarder();
+        long timerPeriod = 1000;
+        timer.schedule(discarder, timerPeriod, timerPeriod);
+        m_pbd.registerDeferredDeleter(discarder);
+
+        // Insert and read buffers. Verify that the discards happen by verifying the segment count
+        int numSegments = 5;
+        int numBuffers = 25;
+        for (int i=0; i<numSegments; i++) {
+            if (i > 0) {
+                m_pbd.updateExtraHeader(null);
+            }
+            for (int j=0; j<numBuffers; j++) {
+                m_pbd.offer(DBBPool.wrapBB(ByteBuffer.allocate(100)));
+            }
+        }
+
+        assertEquals(numSegments, getSortedDirectoryListing().size());
+
+        BinaryDequeReader<ExtraHeaderMetadata> reader = m_pbd.openForRead("testreader");
+        for (int i=0; i<numSegments*numBuffers; i++) {
+            reader.poll(PersistentBinaryDeque.UNSAFE_CONTAINER_FACTORY).discard();
+        }
+
+        m_pbd.closeCursor("testreader");
+        Thread.sleep(timerPeriod + 500); // wait for timer to execute
+        assertNull(discarder.m_error);
+        discarder.cancel();
+    }
+
+    class DeferredDiscarder extends TimerTask implements Executor {
+
+        ConcurrentLinkedQueue<Runnable> m_actions = new ConcurrentLinkedQueue<>();
+        Throwable m_error;
+
+        @Override
+        public void execute(Runnable runnable) {
+            m_actions.add(runnable);
+        }
+
+        @Override
+        public void run() {
+            List<Runnable> copy = new ArrayList<>();
+            int size = m_actions.size();
+            for (int i=0; i<size; i++) {
+                copy.add(m_actions.poll());
+            }
+
+            for (Runnable runnable : copy) {
+                try {
+                    runnable.run();
+                } catch(Throwable t) {
+                    m_error = t;
+                }
+            }
+        }
+    }
+
+    @Test
     public void testPushMaxSize() throws Exception {
         System.out.println("Running testPushMaxSize");
         BBContainer objs[] = new BBContainer[] {
@@ -1273,6 +1421,42 @@ public class TestPersistentBinaryDeque {
             }
             assertEquals(1, m_pbd.numOpenSegments());
         }
+    }
+
+    @Test
+    public void testOutOfOrderAcks() throws Exception {
+        int numEntries = 2;
+        // write 2 segments
+        for (int i=0; i<2; i++) {
+            if (i>0) {
+                m_pbd.updateExtraHeader(null);
+            }
+            for (int j=0; j<numEntries; j++) {
+                m_pbd.offer( DBBPool.wrapBB(getFilledSmallBuffer(0)));
+            }
+        }
+        assertEquals(2, getSortedDirectoryListing().size());
+
+        // read all entries.
+        BinaryDequeReader<ExtraHeaderMetadata> reader = m_pbd.openForRead("testreader");
+        BBContainer cont = null;
+        int index=0;
+        BBContainer[] entries = new BBContainer[2*numEntries];
+        while ((cont = reader.poll(PersistentBinaryDeque.UNSAFE_CONTAINER_FACTORY)) != null) {
+            entries[index++] = cont;
+        }
+        assertEquals(2, getSortedDirectoryListing().size());
+
+        // Ack backwards
+        index = entries.length-1;
+        for (int i=0; i<numEntries; i++) {
+            entries[index--].discard();
+        }
+        assertEquals(2, getSortedDirectoryListing().size());
+        for (int i=0; i<numEntries; i++) {
+            entries[index--].discard();
+        }
+        assertEquals(1, getSortedDirectoryListing().size());
     }
 
     static <M> BinaryDequeReader.Entry<M> pollOnceWithoutDiscard(BinaryDequeReader<M> reader) throws IOException {

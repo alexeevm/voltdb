@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -281,14 +281,14 @@ public:
         m_engine = new MockVoltDBEngine(CLUSTER_ID, &m_topend, &m_enginesPool, &m_drStream, &m_drReplicatedStream);
         s_clusterMap[CLUSTER_ID] = ClusterCtx(m_engine,
                                               SynchronizedThreadLock::s_mpEngine,
-                                              SynchronizedThreadLock::s_enginesByPartitionId,
+                                              SynchronizedThreadLock::s_activeEnginesByPartitionId,
                                               ThreadLocalPool::getThreadPartitionIdForTest());
         SynchronizedThreadLock::resetEngineLocalsForTest();
 
         m_engineReplica = new MockVoltDBEngine(CLUSTER_ID_REPLICA, &m_topend, &m_enginesPool, &m_drStreamReplica, &m_drReplicatedStreamReplica);
         s_clusterMap[CLUSTER_ID_REPLICA] = ClusterCtx(m_engineReplica,
                                                       SynchronizedThreadLock::s_mpEngine,
-                                                      SynchronizedThreadLock::s_enginesByPartitionId,
+                                                      SynchronizedThreadLock::s_activeEnginesByPartitionId,
                                                       ThreadLocalPool::getThreadPartitionIdForTest());
 
         // Make the master cluster the default, starting now.

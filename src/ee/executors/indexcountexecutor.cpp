@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -345,7 +345,7 @@ bool IndexCountExecutor::p_execute(const NValueArray &params) {
     if (m_numOfSearchkeys != 0) {
         // Deal with multi-map
         VOLT_DEBUG("INDEX_LOOKUP_TYPE(%d) m_numSearchkeys(%d) key:%s",
-                   localLookupType, activeNumOfSearchKeys, searchKey.debugNoHeader().c_str());
+                   static_cast<int>(localLookupType), activeNumOfSearchKeys, searchKey.debugNoHeader().c_str());
         if (searchKeyUnderflow == false) {
             if (localLookupType == IndexLookupType::Greater) {
                 rkStart = tableIndex->getCounterLET(&searchKey, true, indexCursor);

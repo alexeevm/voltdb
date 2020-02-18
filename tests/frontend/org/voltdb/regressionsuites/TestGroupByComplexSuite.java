@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -114,6 +114,9 @@ public class TestGroupByComplexSuite extends RegressionSuite {
 
     @Test
     public void testComplexAggs() throws IOException, ProcCallException {
+        if (isHSQL()) {
+            return;
+        }
         loadData(false);
         Client client = getClient();
         ClientResponse cr;

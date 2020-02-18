@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -340,13 +340,6 @@ class PBDRegularSegment<M> extends PBDSegment<M> {
         validateHeader();
         final int initialEntryCount = getNumEntries();
         int entriesTruncated = 0;
-        // Zero entry count means the segment is empty or corrupted, in both cases
-        // the segment can be deleted.
-        if (initialEntryCount == 0) {
-            reader.close(false);
-            close();
-            return Integer.MAX_VALUE;
-        }
         int sizeInBytes = 0;
 
         DBBPool.BBContainer cont;
@@ -866,6 +859,11 @@ class PBDRegularSegment<M> extends PBDSegment<M> {
         }
 
         @Override
+        public boolean allReadAndDiscarded() {
+            return m_discardCount == m_numOfEntries;
+        }
+
+        @Override
         public DBBPool.BBContainer poll(OutputContainerFactory factory) throws IOException {
             return poll(factory, false, false);
         }
@@ -1089,6 +1087,8 @@ class PBDRegularSegment<M> extends PBDSegment<M> {
             m_readCursors.remove(m_cursorId);
             if (keep) {
                 m_closedCursors.put(m_cursorId, this);
+            } else { // if this was already closed, remove it for good
+                m_closedCursors.remove(m_cursorId);
             }
             if (m_readCursors.isEmpty() && !m_isActive) {
                 closeReadersAndFile();

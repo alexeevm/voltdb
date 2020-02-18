@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -204,7 +204,10 @@ public class SnapshotSaveAPI
 
             // Create a barrier to use with the current number of sites to wait for
             // or if the barrier is already set up check if it is broken and reset if necessary
-            final int numLocalSites = context.getLocalSitesCount();
+            final int numLocalSites = context.getLocalActiveSitesCount();
+            if (SNAP_LOG.isDebugEnabled()) {
+                SNAP_LOG.debug("Local active site count for snapshot:" + numLocalSites);
+            }
             SnapshotSiteProcessor.readySnapshotSetupBarriers(numLocalSites);
 
             //From within this EE, record the sequence numbers as of the start of the snapshot (now)

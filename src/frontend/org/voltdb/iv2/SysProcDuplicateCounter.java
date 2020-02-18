@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -26,6 +26,7 @@ import java.util.Map.Entry;
 import org.voltcore.messaging.TransactionInfoBaseMessage;
 import org.voltdb.DependencyPair;
 import org.voltdb.VoltTable;
+import org.voltdb.client.ClientResponse;
 import org.voltdb.messaging.FragmentResponseMessage;
 import org.voltdb.utils.MiscUtils;
 import org.voltdb.utils.VoltTableUtil;
@@ -105,7 +106,7 @@ public class SysProcDuplicateCounter extends DuplicateCounter
         // needs to be a three long array to work
         int[] hashes = new int[] { (int) hash, 0, 0 };
 
-        return checkCommon(hashes, message.isRecovering(), message, false);
+        return checkCommon(hashes, message.isRecovering(), message, ClientResponse.SUCCESS, null);
     }
 
     @Override

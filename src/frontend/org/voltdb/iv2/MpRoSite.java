@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -160,7 +160,18 @@ public class MpRoSite implements Runnable, SiteProcedureConnection
         }
 
         @Override
+        public int getLocalActiveSitesCount() {
+            throw new RuntimeException("Not needed for RO MP Site, shouldn't be here.");
+        }
+
+        @Override
         public boolean isLowestSiteId()
+        {
+            throw new RuntimeException("Not needed for RO MP Site, shouldn't be here.");
+        }
+
+        @Override
+        public void setLowestSiteId()
         {
             throw new RuntimeException("Not needed for RO MP Site, shouldn't be here.");
         }
@@ -346,6 +357,11 @@ public class MpRoSite implements Runnable, SiteProcedureConnection
 
         @Override
         public InitiatorMailbox getInitiatorMailbox() {
+            throw new RuntimeException("RO MP Site doesn't do this, shouldn't be here.");
+        }
+
+        @Override
+        public void decommissionSite(boolean remove, boolean promote, int newSitePerHost) {
             throw new RuntimeException("RO MP Site doesn't do this, shouldn't be here.");
         }
     };

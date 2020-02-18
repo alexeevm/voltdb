@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -24,8 +24,6 @@ package org.voltdb.catalog;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-
-import org.voltdb.NativeLibraryLoader;
 
 /**
  * Helps serialize the VoltDB catalog.
@@ -83,8 +81,30 @@ public final class CatalogSerializer implements CatalogVisitor {
     }
 
     private native void writeCreationCommand(CatalogType ct);
-    native void writeCommandForField(CatalogType ct, String field, boolean printFullPath);
     native void writeDeleteDiffStatement(CatalogType ct, String parentName);
+
+    void writeCommandForField(CatalogType ct, String field, boolean printFullPath) {
+        m_builder.append("set ");
+        if (printFullPath) {
+            m_builder.append(ct.getCatalogPath()).append(' ');
+        } else {
+            m_builder.append("$PREV "); // use caching to shrink output + speed parsing
+        }
+        m_builder.append(field).append(' ');
+        Object value = ct.getField(field);
+        if (value == null) {
+            m_builder.append("null");
+        } else if (value.getClass() == Byte.class || value.getClass() == Integer.class || value.getClass() == Boolean.class) {
+                m_builder.append(value);
+        } else if (value.getClass() == String.class) {
+            m_builder.append("\"").append(value).append("\"");
+        } else if (value instanceof CatalogType) {
+            m_builder.append(((CatalogType)value).getCatalogPath());
+        } else {
+            throw new CatalogException("Unsupported field value '" +   value + "' type '" + value.getClass() + "'");
+        }
+        m_builder.append("\n");
+    }
 
     private void writeChildCommands(CatalogType ct) {
         String[] childCollections = ct.getChildCollections();

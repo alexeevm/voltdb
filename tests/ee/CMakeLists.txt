@@ -1,5 +1,5 @@
 # This file is part of VoltDB.
-# Copyright (C) 2008-2019 VoltDB Inc.
+# Copyright (C) 2008-2020 VoltDB Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -158,6 +158,7 @@ SET(VOLTDB_MANUAL_VALGRIND_FAILING_TEST_PROGRAMS
   memleaktests/still_reachable_losses
   memleaktests/possible_losses
   memleaktests/rw_deleted
+  storage/TableTupleAllocatorTest
 )
 #
 # These are expected to fail.  There are none of
@@ -172,7 +173,7 @@ SET (VOLTDB_MANUAL_FAILING_TEST_PROGRAMS
 # are none of them now, but there used to be and
 # may be in the future.
 SET (VOLTDB_NOVALGRIND_TEST_PROGRAMS
-  )
+)
 #
 # Generated test programs are created by calling a Java program
 # in the server.  The java class we run is named here.  We may

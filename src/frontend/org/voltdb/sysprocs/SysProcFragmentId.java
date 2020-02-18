@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -274,6 +274,11 @@ public class SysProcFragmentId
     // @CollectDrTrackers
     public static final int PF_collectDrTrackers = 400;
     public static final int PF_collectDrTrackersAgg = 401;
+
+
+    // @StopReplicas
+    public static final int PF_stopReplicas = 402;
+    public static final int PF_stopReplicasAggregate = 403;
 
     public static boolean isEnableScoreboardFragment(byte[] planHash) {
         long fragId = VoltSystemProcedure.hashToFragId(planHash);

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -989,6 +989,15 @@ public class ExecutionEngineIPC extends ExecutionEngine {
         m_connection.close();
         System.out.println("Shutdown IPC connection done.");
         m_dataNetworkOrigin.discard();
+    }
+
+    @Override
+    public void decommission(boolean remove, boolean promote, int newSitePerHost) throws EEException, InterruptedException {
+        System.out.println("Decommissioning IPC connection in progress.");
+        System.out.println("But first, a little history:\n" + m_history );
+
+
+        System.out.println("Decommissioned IPC connection done.");
     }
 
     private void shutDown() {

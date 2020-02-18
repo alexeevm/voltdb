@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -240,10 +240,9 @@ public class UpdateCore extends VoltSystemProcedure {
                 throw ex;
             }
 
-            String canUpdate = ExportManagerInterface.instance().canUpdateCatalog();
-            if (canUpdate != null) {
-                throw new SpecifiedException(ClientResponse.GRACEFUL_FAILURE, canUpdate);
-            }
+            // Note: this call can block up to a fixed timeout waiting for data source
+            // to complete closing.
+            ExportManagerInterface.instance().waitOnClosingSources();
 
             // Send out fragments to do the initial round-trip to synchronize
             // all the cluster sites on the start of catalog update, we'll do
@@ -329,6 +328,7 @@ public class UpdateCore extends VoltSystemProcedure {
             return new DependencyPair.TableDependencyPair(SysProcFragmentId.PF_updateCatalog, result);
         }
         else if (fragmentId == SysProcFragmentId.PF_updateCatalogAggregate) {
+            log.info("Executing PF_updateCatalogAggregate");
             VoltTable result = VoltTableUtil.unionTables(dependencies.get(SysProcFragmentId.PF_updateCatalog));
             return new DependencyPair.TableDependencyPair(SysProcFragmentId.PF_updateCatalogAggregate, result);
         }
@@ -378,9 +378,7 @@ public class UpdateCore extends VoltSystemProcedure {
                            String catalogDiffCommands,
                            int expectedCatalogVersion,
                            long genId,
-                           byte[] catalogBytes,
                            byte[] catalogHash,
-                           byte[] deploymentBytes,
                            byte[] deploymentHash,
                            byte worksWithElastic,
                            String[] tablesThatMustBeEmpty,
@@ -428,7 +426,8 @@ public class UpdateCore extends VoltSystemProcedure {
         // log the start of UpdateCore
         log.info("New catalog update from: " + VoltDB.instance().getCatalogContext().getCatalogLogString());
         log.info("To: catalog hash: " + Encoder.hexEncode(catalogHash).substring(0, 10) +
-                ", deployment hash: " + Encoder.hexEncode(deploymentHash).substring(0, 10));
+                ", deployment hash: " + Encoder.hexEncode(deploymentHash).substring(0, 10) +
+                ", version: " + (expectedCatalogVersion + 1));
 
         start = System.nanoTime();
 
@@ -443,8 +442,7 @@ public class UpdateCore extends VoltSystemProcedure {
         }
 
         try {
-            CatalogUtil.updateCatalogToZK(zk, expectedCatalogVersion + 1, genId,
-                    catalogBytes, catalogHash, deploymentBytes);
+            CatalogUtil.publishCatalog(zk, expectedCatalogVersion + 1);
         } catch (KeeperException | InterruptedException e) {
             log.error("error writing catalog bytes on ZK during @UpdateCore");
             throw e;

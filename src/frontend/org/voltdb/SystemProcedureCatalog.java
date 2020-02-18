@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -667,6 +667,12 @@ public class SystemProcedureCatalog {
         builder.put("@CollectDrSiteTrackers",
                 Builder.createMp("org.voltdb.sysprocs.CollectDrSiteTrackers").commercial().notDurable()
                         .allowedInReplica().build());
+        builder.put("@StopReplicas",
+                new Config("org.voltdb.sysprocs.StopReplicas",
+                        false, false, false,  0, VoltType.INVALID,
+                        true, false, true, Durability.NOT_DURABLE,
+                        false, true, Restartability.RESTARTABLE));
+
         listing = builder.build();
     }
 

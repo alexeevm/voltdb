@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -52,6 +52,13 @@ import com.google_voltpatches.common.base.Preconditions;
 import com.google_voltpatches.common.base.Throwables;
 
 public class ZKUtil {
+
+    // At create time the zk catalog version node status is pending,
+    // once the whole catalog is uploaded, mark the version node as complete.
+    public enum ZKCatalogStatus {
+        PENDING,
+        COMPLETE,
+    }
 
      /** Prevents class from being inherited or instantiated **/
      private ZKUtil() {}

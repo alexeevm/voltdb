@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -16,6 +16,8 @@
  */
 
 package org.hsqldb_voltpatches;
+
+import org.apache.commons.lang3.StringEscapeUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -122,7 +124,7 @@ public class VoltXMLElement {
             sb.append(sep)
               .append(e.getKey())
               .append("=\"")
-              .append(e.getValue())
+              .append(StringEscapeUtils.escapeXml11(e.getValue()))
               .append("\"");
             sep = attrIndent;
         }

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -264,19 +264,8 @@ public class ExportRowSchema extends ExportRow implements DeferredSerialization 
                 .append(this.initialGenerationId)
                 .append(":")
                 .append(this.generation)
-                .append(" - [");
-
-        Iterator<String> itNames = this.names.iterator();
-        Iterator<VoltType> itTypes = this.types.iterator();
-        Iterator<Integer> itSizes = this.lengths.iterator();
-        while(itNames.hasNext()) {
-            sb.append(itNames.next())
-              .append(":")
-              .append(itTypes.next())
-              .append(":")
-              .append(itSizes.next())
-              .append((itNames.hasNext()) ? ", " : "]");
-        }
+                .append(" - ")
+                .append(toSchemaString());
         return sb.toString();
     }
 }

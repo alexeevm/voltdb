@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -172,6 +172,11 @@ public class Iv2RejoinCoordinator extends JoinCoordinator {
                                                             CreateMode.EPHEMERAL, REJOINLOG, "node rejoin");
             if (blockerError == null) {
                 sw.stop();
+                return;
+            }
+            if (VoltZK.zkNodeExists(messenger.getZK(), VoltZK.reducedClusterSafety)) {
+                VoltDB.crashLocalVoltDB("Cluster is in reduced ksafety state before this node could finish rejoin. " +
+                        "As a result, the rejoin operation has been canceled.");
                 return;
             }
 

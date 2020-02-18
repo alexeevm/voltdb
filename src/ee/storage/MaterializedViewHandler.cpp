@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -532,7 +532,7 @@ namespace voltdb {
     void ReplicatedMaterializedViewHandler::handleTupleInsert(PersistentTable *sourceTable, bool fallible) {
         vassert(SynchronizedThreadLock::isInSingleThreadMode());
         vassert(SynchronizedThreadLock::usingMpMemory());
-        EngineLocals& curr = SynchronizedThreadLock::s_enginesByPartitionId[m_handlerPartitionId];
+        EngineLocals& curr = SynchronizedThreadLock::s_activeEnginesByPartitionId[m_handlerPartitionId];
         SynchronizedThreadLock::assumeSpecificSiteContext(curr);
         m_partitionedHandler->handleTupleInsert(sourceTable, fallible);
         SynchronizedThreadLock::assumeMpMemoryContext();
@@ -541,7 +541,7 @@ namespace voltdb {
     void ReplicatedMaterializedViewHandler::handleTupleDelete(PersistentTable *sourceTable, bool fallible) {
         vassert(SynchronizedThreadLock::isInSingleThreadMode());
         vassert(SynchronizedThreadLock::usingMpMemory());
-        EngineLocals& curr = SynchronizedThreadLock::s_enginesByPartitionId[m_handlerPartitionId];
+        EngineLocals& curr = SynchronizedThreadLock::s_activeEnginesByPartitionId[m_handlerPartitionId];
         SynchronizedThreadLock::assumeSpecificSiteContext(curr);
         m_partitionedHandler->handleTupleDelete(sourceTable, fallible);
         SynchronizedThreadLock::assumeMpMemoryContext();

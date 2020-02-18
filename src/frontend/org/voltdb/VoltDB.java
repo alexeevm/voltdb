@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -882,6 +882,7 @@ public class VoltDB {
         public Map<String, String> asNodeSettingsMap() {
             return ImmutableMap.<String, String>builder()
                     .put(NodeSettings.LOCAL_SITES_COUNT_KEY, Integer.toString(m_sitesperhost))
+                    .put(NodeSettings.LOCAL_ACTIVE_SITES_COUNT_KEY, Integer.toString(m_sitesperhost))
                     .build();
         }
 
@@ -1229,13 +1230,14 @@ public class VoltDB {
     /**
      * Exit the process with an error message, optionally with a stack trace.
      */
-    public static void crashLocalVoltDB(String errMsg, boolean stackTrace, Throwable thrown) {
-        crashLocalVoltDB(errMsg, stackTrace, thrown, true);
+    public static RuntimeException crashLocalVoltDB(String errMsg, boolean stackTrace, Throwable thrown) {
+        return crashLocalVoltDB(errMsg, stackTrace, thrown, true);
     }
     /**
      * Exit the process with an error message, optionally with a stack trace.
      */
-    public static void crashLocalVoltDB(String errMsg, boolean stackTrace, Throwable thrown, boolean logFatal) {
+    public static RuntimeException crashLocalVoltDB(String errMsg, boolean stackTrace, Throwable thrown,
+            boolean logFatal) {
 
         if (singleton != null) {
             singleton.notifyOfShutdown();
@@ -1278,7 +1280,7 @@ public class VoltDB {
                 // turn off client interface as fast as possible
                 // we don't expect this to ever fail, but if it does, skip to dying immediately
                 if (!turnOffClientInterface()) {
-                    return; // this will jump to the finally block and die faster
+                    return null; // this will jump to the finally block and die faster
                 }
 
                 // Flush trace files
@@ -1368,6 +1370,7 @@ public class VoltDB {
             ShutdownHooks.useOnlyCrashHooks();
             System.exit(-1);
         }
+        return null;
     }
 
     /*

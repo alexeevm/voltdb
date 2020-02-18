@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -947,6 +947,8 @@ public class DDLCompiler {
                 addUserDefinedFunctionToCatalog(db, node);
             }
         }
+        // push down parsing schema for catalog
+        db.getCatalog().parse(m_schema.toXML());
         for (VoltXMLElement node : m_schema.children) {
             if (node.name.equals("table")) {
                 addTableToCatalog(db, node, isXDCR);        // Inside the function, it skips when a table catalog had already been created.

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -17,6 +17,7 @@
 
 package org.voltdb.exportclient.kafka;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -70,6 +71,8 @@ public class KafkaExportClient extends ExportClientBase {
     private final static String OLD_PARTITIONER = "partitioner.class";
     private final static String ACKS_TIMEOUT = "acks.retry.timeout";
     private final static String LEGACY_ACKS = "request.required.acks";
+
+    private final static String MAX_BLOCK_MS_DEFAULT = "60000";
 
     private final static Splitter COMMA_SPLITTER = Splitter.on(",").omitEmptyStrings().trimResults();
     private final static Splitter PERIOD_SPLITTER = Splitter.on(".").omitEmptyStrings().trimResults();
@@ -233,21 +236,6 @@ public class KafkaExportClient extends ExportClientBase {
         }
         m_producerConfig.setProperty(ProducerConfig.BATCH_SIZE_CONFIG, batchSize);
 
-        String acksTimeout = "5000";
-        try {
-            acksTimeout = config.getProperty(ACKS_TIMEOUT, acksTimeout);
-            if ((m_acksTimeout=Integer.parseInt(acksTimeout)) <= 0) {
-                throw new IllegalArgumentException(
-                        "\"" + ACKS_TIMEOUT + "\" must be >= 0"
-                        );
-            }
-        }  catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    "\"" + ACKS_TIMEOUT + "\" must be an integer", e
-                    );
-        }
-        m_producerConfig.remove(ACKS_TIMEOUT);
-
         String kSerializer = config.getProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "").trim();
         if (kSerializer.isEmpty()) {
             m_producerConfig.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
@@ -280,7 +268,7 @@ public class KafkaExportClient extends ExportClientBase {
             m_producerConfig.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapVal);
         }
 
-        m_producerConfig.setProperty(ProducerConfig.MAX_BLOCK_MS_CONFIG, "60000");
+        m_producerConfig.setProperty(ProducerConfig.MAX_BLOCK_MS_CONFIG, MAX_BLOCK_MS_DEFAULT);
 
         LOG.info("Configuring Kafka export client: %s", m_producerConfig);
     }
@@ -293,13 +281,14 @@ public class KafkaExportClient extends ExportClientBase {
     class KafkaExportDecoder extends ExportDecoderBase {
 
         String m_topic = null;
-        boolean m_primed = false;
         Properties m_decoderProducerConfig;
         KafkaProducer<String, String> m_producer;
         final CSVStringDecoder m_decoder;
         final List<Future<RecordMetadata>> m_futures = new ArrayList<>();
         private final AtomicBoolean m_failure = new AtomicBoolean(false);
         final ListeningExecutorService m_es;
+        private volatile boolean m_primed = false;
+        private volatile boolean m_paused = false;;
 
         public KafkaExportDecoder(AdvertisedDataSource source) {
             super(source);
@@ -325,7 +314,24 @@ public class KafkaExportClient extends ExportClientBase {
             m_decoderProducerConfig.putAll(m_producerConfig);
         }
 
-        final void checkOnFirstRow() throws RestartBlockException {
+        @Override
+        public synchronized void pause() {
+            m_paused = true;
+            if (m_producer != null) {
+                m_producer.close(Duration.ofMillis(0));
+            }
+            m_primed = false;
+        }
+
+        @Override
+        public synchronized void resume() {
+            m_paused = false;
+        }
+
+        final synchronized void checkOnFirstRow() throws RestartBlockException {
+            if (m_paused) {
+                throw new RestartBlockException("Exporter has been paused", false);
+            }
             if (!m_primed) try {
                 setClientId();
                 m_producer = new KafkaProducer<>(m_decoderProducerConfig);
@@ -367,9 +373,10 @@ public class KafkaExportClient extends ExportClientBase {
         public void onBlockCompletion(ExportRow row) throws RestartBlockException {
             try {
                 if (m_pollFutures || m_failure.get()) {
+                    m_producer.flush();
                     ImmutableList<Future<RecordMetadata>> pollFutures = ImmutableList.copyOf(m_futures);
                     for (Future<RecordMetadata> fut: pollFutures) {
-                        fut.get(m_acksTimeout, TimeUnit.MILLISECONDS);
+                        fut.get(1, TimeUnit.MILLISECONDS); // flush call above ensures that the send calls completed.
                     }
                 }
             } catch (TimeoutException e) {
@@ -388,13 +395,13 @@ public class KafkaExportClient extends ExportClientBase {
 
         @Override
         public void onBlockStart(ExportRow row) throws RestartBlockException {
-            if (!m_primed) checkOnFirstRow();
+            checkOnFirstRow();
             if (m_topic == null) populateTopic(row.tableName);
         }
 
         @Override
         public boolean processRow(ExportRow rd) throws RestartBlockException {
-            if (!m_primed) checkOnFirstRow();
+            checkOnFirstRow();
 
             String decoded = m_decoder.decode(rd.generation, rd.tableName, rd.types, rd.names, null, rd.values);
             //Use partition value by default if its null use partition id.
@@ -415,18 +422,21 @@ public class KafkaExportClient extends ExportClientBase {
             } catch (KafkaException e) {
                 LOG.warn("Unable to send %s", e, krec);
                 throw new RestartBlockException("Unable to send message", e, true);
-            } catch (IllegalStateException e) {
-                LOG.warn("Unable to send %s", e, krec);
-                if (m_producer != null) try { m_producer.close(); } catch (Exception ignoreIt) {}
-                m_primed = false;
-                throw new RestartBlockException("Unable to send message", e, true);
+            } catch(IllegalStateException e) { // thrown if a catalog update closes the producer through pause()
+                throw new RestartBlockException("IllegalStateException, possibly because kafka producer was closed", e, false);
             }
             return true;
         }
 
         @Override
         public void sourceNoLongerAdvertised(AdvertisedDataSource source) {
-            if (m_producer != null) try { m_producer.close(); } catch (Exception ignoreIt) {}
+            if (m_producer != null) {
+                try {
+                    m_producer.close(Duration.ofMillis(0));
+                } catch (Exception ignoreIt) {
+                    LOG.debug("Unexpected error trying to close KafkaProducer", ignoreIt);
+                }
+            }
             if (m_es != null) {
                 m_es.shutdown();
                 try {

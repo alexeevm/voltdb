@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -47,8 +47,12 @@ public interface SystemProcedureExecutionContext {
 
     public int getLocalSitesCount();
 
+    public int getLocalActiveSitesCount();
+
     // does this site have "lowest site id" responsibilities.
     public boolean isLowestSiteId();
+
+    public void setLowestSiteId();
 
     public int getClusterId();
 
@@ -125,4 +129,6 @@ public interface SystemProcedureExecutionContext {
                                                List<DBBPool.BBContainer> outputBuffers);
 
     public InitiatorMailbox getInitiatorMailbox();
+
+    void decommissionSite(boolean remove, boolean promote, int newSitePerHost);
 }

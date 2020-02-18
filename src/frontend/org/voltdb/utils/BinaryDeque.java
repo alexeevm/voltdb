@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -18,6 +18,7 @@ package org.voltdb.utils;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.Executor;
 
 import org.voltcore.utils.DBBPool.BBContainer;
 import org.voltcore.utils.DeferredSerialization;
@@ -93,11 +94,23 @@ public interface BinaryDeque<M> {
     public BinaryDequeReader<M> openForRead(String cursorId) throws IOException;
 
     /**
-     * Close a BinaryDequeReader for reader, also close the SegmentReader for the segment if it is reading one
+     * Close a BinaryDequeReader reader, also close the SegmentReader for the segment if it is reading one.
      * @param cursorId a String identifying the cursor.
      * @throws IOException on any errors trying to close the SegmentReader if it is the last one for the segment
      */
-    public void closeCursor(String cursorId);
+    default public void closeCursor(String cursorId) {
+        closeCursor(cursorId, false);
+    }
+
+    /**
+     * Close a BinaryDequeReader reader, optionally purging the segments on the last reader closing.
+     * <p>
+     * Purging segments on last reader closing is a DR-specific requirement, see implementation.
+     *
+     * @param cursorId
+     * @param purgeOnLastCursor true if segment purge is requested on last reader closing.
+     */
+    public void closeCursor(String cursorId, boolean purgeOnLastCursor);
 
     public int countCursors();
 
@@ -112,6 +125,16 @@ public interface BinaryDeque<M> {
     public void scanEntries(BinaryDequeScanner scanner) throws IOException;
 
     public boolean deletePBDSegment(BinaryDequeValidator<M> checker) throws IOException;
+
+    /**
+     * If pbd files should only be deleted based on some external events,
+     * register a deferred action handler using this. All deletes will be sent
+     * to the {@code deleter} as a Runnable, which may be executed later.
+     *
+     * @param deleter {@link java.util.concurrent.Executor} that will do the actual deletes
+     *
+     */
+    public void registerDeferredDeleter(Executor deleter);
 
     /**
      * Release all resources (open files) held by the back store of the queue. Continuing to use the deque

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -108,11 +108,14 @@ public class SnapshotSiteProcessor {
 
     public static void readySnapshotSetupBarriers(int numSites) {
         synchronized (SnapshotSiteProcessor.m_snapshotCreateLock) {
-            if (requireNewBarrierInTest) {
+            if (requireNewBarrierInTest || SnapshotSiteProcessor.m_snapshotCreateSetupBarrier.getParties() != numSites) {
                 SnapshotSiteProcessor.m_snapshotCreateFinishBarrier = new CyclicBarrier(numSites);
                 SnapshotSiteProcessor.m_snapshotCreateSetupBarrier =
                         new CyclicBarrier(numSites, SnapshotSiteProcessor.m_snapshotCreateSetupBarrierAction);
                 requireNewBarrierInTest = false;
+                if (SNAP_LOG.isDebugEnabled()) {
+                    SNAP_LOG.debug("Local active site count for snapshot barriers:" + numSites);
+                }
             } else if (SnapshotSiteProcessor.m_snapshotCreateSetupBarrier.isBroken()) {
                 SnapshotSiteProcessor.m_snapshotCreateSetupBarrier.reset();
                 SnapshotSiteProcessor.m_snapshotCreateFinishBarrier.reset();

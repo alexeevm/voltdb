@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -18,6 +18,7 @@
 package org.voltdb.iv2;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
@@ -43,7 +44,6 @@ import org.voltdb.StatsAgent;
 import org.voltdb.VoltDB;
 import org.voltdb.VoltZK;
 import org.voltdb.dtxn.TransactionState;
-import org.voltdb.export.ExportManagerInterface;
 import org.voltdb.iv2.LeaderCache.LeaderCallBackInfo;
 import org.voltdb.iv2.RepairAlgo.RepairResult;
 import org.voltdb.iv2.SpScheduler.DurableUniqueIdListener;
@@ -61,8 +61,31 @@ public class SpInitiator extends BaseInitiator<SpScheduler> implements Promotabl
 {
     final private LeaderCache m_leaderCache;
     private boolean m_promoted = false;
-
     private static final VoltLogger exportLog = new VoltLogger("EXPORT");
+
+    public static enum ServiceState {
+        NORMAL(0),
+        ELIGIBLE_REMOVAL(1),
+        REMOVED(2);
+        final int state;
+        ServiceState(int state) {
+            this.state = state;
+        }
+        int get() {
+            return state;
+        }
+        public boolean isNormal() {
+            return state == NORMAL.get();
+        }
+        public boolean isEligibleForRemoval() {
+            return state == ELIGIBLE_REMOVAL.get();
+        }
+        public boolean isRemoved() {
+            return state == REMOVED.get();
+        }
+    }
+
+    volatile ServiceState m_serviceState;
 
     LeaderCache.Callback m_leadersChangeHandler = new LeaderCache.Callback()
     {
@@ -129,6 +152,8 @@ public class SpInitiator extends BaseInitiator<SpScheduler> implements Promotabl
         m_leaderCache = new LeaderCache(messenger.getZK(), "SpInitiator-iv2appointees-" + partition,
                 ZKUtil.joinZKPath(VoltZK.iv2appointees, Integer.toString(partition)), m_leadersChangeHandler);
         m_scheduler.m_repairLog = m_repairLog;
+        m_serviceState = ServiceState.NORMAL;
+        m_scheduler.setServiceState(m_serviceState);
     }
 
     @Override
@@ -155,6 +180,7 @@ public class SpInitiator extends BaseInitiator<SpScheduler> implements Promotabl
                 numberOfPartitions, startAction, agent, memStats, cl,
                 coreBindIds, isLowestSiteId);
 
+        m_executionSite.setServiceState(m_serviceState);
         // add ourselves to the ephemeral node list which BabySitters will watch for this
         // partition
         LeaderElector.createParticipantNode(m_messenger.getZK(),
@@ -288,15 +314,6 @@ public class SpInitiator extends BaseInitiator<SpScheduler> implements Promotabl
                             + "trying. Retrying.");
                 }
             }
-            // Tag along and become the export master too
-            // leave the export on the former leader, now a replica
-            if (!migratePartitionLeader && lastLeaderHSId != m_initiatorMailbox.getHSId()) {
-                if (exportLog.isDebugEnabled()) {
-                    exportLog.debug("Export Manager has been notified that local partition " +
-                            m_partitionId + " to accept export stream mastership.");
-                }
-                ExportManagerInterface.instance().becomeLeader(m_partitionId);
-            }
         } catch (Exception e) {
             VoltDB.crashLocalVoltDB("Terminally failed leader promotion.", true, e);
         }
@@ -365,5 +382,61 @@ public class SpInitiator extends BaseInitiator<SpScheduler> implements Promotabl
     @Override
     protected InitiatorMailbox createInitiatorMailbox(JoinProducerBase joinProducer) {
         return new InitiatorMailbox(m_partitionId, m_scheduler, m_messenger, m_repairLog, joinProducer);
+    }
+
+    public void updateServiceState(ServiceState state) {
+        m_serviceState = state;
+        m_executionSite.setServiceState(m_serviceState);
+        m_scheduler.setServiceState(m_serviceState);
+    }
+
+    public ServiceState getServiceState() {
+        return m_serviceState;
+    }
+
+    @Override
+    public void shutdownService() {
+        // do not shutdown leader
+        if (isLeader()) {
+            return;
+        }
+        logMasterMode();
+        try {
+            final String partitionPath = LeaderElector.electionDirForPartition(
+                    VoltZK.leaders_initiators, m_partitionId);
+            List<String> children = m_messenger.getZK().getChildren(partitionPath, null);
+            for (String child : children) {
+                if (child.startsWith(Long.toString(getInitiatorHSId()) + "_")) {
+                    final String path = ZKUtil.joinZKPath(partitionPath, child);
+                    m_messenger.getZK().delete(path, -1);
+                    break;
+                }
+            }
+        } catch (KeeperException e) {
+            if (e.code() != KeeperException.Code.NONODE) {
+                VoltDB.crashLocalVoltDB("This ZK call should never fail", true, e);
+            }
+        } catch (Exception e) {
+            VoltDB.crashLocalVoltDB("This ZK call should never fail", true, e);
+        }
+
+        try {
+            m_leaderCache.shutdown();
+        } catch (Exception e) {
+            VoltDB.crashLocalVoltDB("This ZK call should never fail", true, e);
+        }
+        TransactionTaskQueue.removeScoreboard(CoreUtils.getSiteIdFromHSId(getInitiatorHSId()));
+        super.shutdownService();
+
+        if (tmLog.isDebugEnabled()) {
+            tmLog.debug(String.format("Shutdown leader initiator, leader cache, update scoreboard, execution engine for partition %d", m_partitionId));
+        }
+        m_serviceState = ServiceState.REMOVED;
+        m_executionSite.setServiceState(m_serviceState);
+        m_scheduler.setServiceState(m_serviceState);
+    }
+
+    public void logMasterMode() {
+        m_scheduler.logMasterMode();
     }
 }

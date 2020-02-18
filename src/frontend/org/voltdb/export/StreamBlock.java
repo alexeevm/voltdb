@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -85,10 +85,6 @@ public class StreamBlock {
         }
     }
 
-    public boolean canRelease() {
-        return m_refCount.get() == 1;
-    }
-
     public ExportRowSchema getSchema() {
         return m_entry.getExtraHeader();
     }
@@ -146,9 +142,8 @@ public class StreamBlock {
     public void releaseTo(long releaseSequenceNumber)
     {
         assert(releaseSequenceNumber >= m_startSequenceNumber);
-        m_releaseOffset = (int)(releaseSequenceNumber - m_startSequenceNumber);
-        // if it is fully released, we will discard the block
-        assert(m_releaseOffset < (m_rowCount - 1));
+        m_releaseOffset = releaseSequenceNumber >= lastSequenceNumber() ?
+                (m_rowCount - 1) : (int)(releaseSequenceNumber - m_startSequenceNumber);
     }
 
     boolean isPersisted() {
@@ -170,6 +165,12 @@ public class StreamBlock {
      */
     private final boolean m_isPersisted;
 
+    /**
+     * Use this when we need a copy BBContainer with refcount incremented.
+     *
+     * @return A BBContainer with same bytes. Discard of the returned BBContainer will trigger a
+     * discard on this BBContainer when all the references are released.
+     */
     public BBContainer unreleasedContainer() {
         m_refCount.incrementAndGet();
         return getRefCountingContainer(m_entry.getData().slice().asReadOnlyBuffer());

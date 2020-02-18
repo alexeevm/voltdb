@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -28,7 +28,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import org.voltcore.logging.Level;
 import org.voltcore.logging.VoltLogger;
 import org.voltcore.messaging.TransactionInfoBaseMessage;
 import org.voltcore.messaging.VoltMessage;
@@ -374,5 +373,10 @@ public class RepairLog
         logSummary(sb, m_logMP, indentStr);
         sb.append(indentStr).append("SP RepairLog:");
         logSummary(sb, m_logSP, indentStr);
+    }
+
+    public void clear() {
+        m_logMP.clear();
+        m_logSP.clear();
     }
 }

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -73,6 +73,7 @@ public abstract class PBDSegment<M> {
     final long m_index;
     // Persistent ID of this segment, based on managing a monotonic counter
     final long m_id;
+    boolean m_deleteOnAck;
 
     PBDSegment(File file, long index, long id) {
         super();

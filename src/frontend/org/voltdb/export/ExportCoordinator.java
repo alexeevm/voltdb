@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -361,8 +361,9 @@ public class ExportCoordinator {
                                 // through another runnable and the invocation path.
                                 requestTrackers();
                             } else {
-                                // Reset the safe point to force a Mastership re-evaluation
+                                // Reset the safe point and resume polling to force a Mastership re-evaluation
                                 resetSafePoint();
+                                m_eds.resumePolling();
                             }
                         } catch (Exception e) {
                             exportLog.error("Failed to change to new leader: " + e);
@@ -470,7 +471,7 @@ public class ExportCoordinator {
                                     exportLog.debug("Truncating coordination tracker: " + tracker
                                             + ", to seqNo: " + lastReleasedSeqNo);
                                 }
-                                tracker.truncate(lastReleasedSeqNo);
+                                tracker.truncateBefore(lastReleasedSeqNo);
                             }
                             int bufSize = tracker.getSerializedSize() + 4;
                             response = ByteBuffer.allocate(bufSize);
@@ -928,7 +929,7 @@ public class ExportCoordinator {
                         exportLog.debug("Export coordinator shutting down...");
                     }
                     m_stateMachine.shutdownCoordinationTask();
-                    m_ssm.ShutdownSynchronizedStatesManager();
+                    m_ssm.shutdownSynchronizedStatesManager();
 
                 } catch (Exception e) {
                     exportLog.error("Failed to initiate a coordinator shutdown: " + e);

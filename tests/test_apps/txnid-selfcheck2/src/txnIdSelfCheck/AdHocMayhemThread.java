@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -175,7 +175,7 @@ public class AdHocMayhemThread extends BenchmarkThread {
             try {
                 txnsOutstanding.acquire();
             } catch (InterruptedException e) {
-                log.error("AdHocMayhemThread interrupted while waiting for permit. Will end AdHoc work.", e);
+                log.warn("AdHocMayhemThread interrupted while waiting for permit. Will end AdHoc work.", e);
                 return;
             }
 
@@ -186,7 +186,7 @@ public class AdHocMayhemThread extends BenchmarkThread {
                 client.callProcedure(new AdHocCallback(), "@AdHoc", sql);
             }
             catch (NoConnectionsException e) {
-                log.error("AdHocMayhemThread got NoConnectionsException on proc call. Will sleep.");
+                log.warn("AdHocMayhemThread got NoConnectionsException on proc call. Will sleep.");
                 m_needsBlock.set(true);
             }
             catch (Exception e) {

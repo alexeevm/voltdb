@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -331,6 +331,20 @@ public class ExecutionEngineJNI extends ExecutionEngine {
         m_udfBufferC.discard();
         m_udfBuffer = null;
         LOG.trace("Released Execution Engine.");
+    }
+
+    /**
+     * Reset the Engine object.
+     */
+    @Override
+    public void decommission(boolean remove, boolean promote, int newSitePerHost) throws EEException {
+        LOG.trace("Decommissioning Execution Engine... " + pointer);
+        if (pointer != 0L) {
+            final int errorCode = nativeDecommission(pointer,remove,promote,newSitePerHost);
+            checkErrorCode(errorCode);
+        }
+        // Don't need reset the buffers, they can be reused after recommission
+        LOG.trace("Decommissioned Execution Engine.");
     }
 
     /**

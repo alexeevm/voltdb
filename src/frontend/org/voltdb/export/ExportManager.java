@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2019 VoltDB Inc.
+ * Copyright (C) 2008-2020 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -28,15 +28,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.voltcore.logging.Level;
 import org.voltcore.logging.VoltLogger;
 import org.voltcore.messaging.HostMessenger;
+import org.voltcore.utils.CoreUtils;
 import org.voltcore.utils.DBBPool;
 import org.voltcore.utils.Pair;
 import org.voltdb.CatalogContext;
 import org.voltdb.ClientInterface;
+import org.voltdb.ClientInterfaceRepairCallback;
 import org.voltdb.ExportStatsBase.ExportStatsRow;
 import org.voltdb.SimpleClientResponseAdapter;
 import org.voltdb.SnapshotCompletionMonitor.ExportSnapshotTuple;
@@ -49,6 +53,7 @@ import org.voltdb.catalog.ConnectorProperty;
 import org.voltdb.catalog.ConnectorTableInfo;
 import org.voltdb.client.ProcedureCallback;
 import org.voltdb.export.ExportDataSource.StreamStartAction;
+import org.voltdb.iv2.MpInitiator;
 import org.voltdb.sysprocs.ExportControl.OperationMode;
 import org.voltdb.utils.CatalogUtil;
 import org.voltdb.utils.LogKeys;
@@ -119,30 +124,18 @@ public class ExportManager implements ExportManagerInterface
     private int m_exportTablesCount = 0;
     private int m_connCount = 0;
     private boolean m_startPolling = false;
-    private SimpleClientResponseAdapter m_adapter;
+    private SimpleClientResponseAdapter m_migratePartitionAdapter;
     private ClientInterface m_ci;
 
-    // Track the data sources being closed
+    // Track the data sources being closed, and a lock allowing {@code canUpdateCatalog()}
+    // to wait for all closed sources.
     private HashMultimap<String, Integer> m_dataSourcesClosing = HashMultimap.create();
+    private final Semaphore m_allowCatalogUpdate = new Semaphore(1);
+    private final long UPDATE_CORE_TIMEOUT_SECONDS = 30;
 
     @Override
     public ExportManagerInterface.ExportMode getExportMode() {
         return ExportManagerInterface.ExportMode.BASIC;
-    }
-
-    /**
-     * Indicate to associated {@link ExportGeneration}s to become
-     * leaders for the given partition id
-     * @param partitionId
-     */
-    @Override
-    synchronized public void becomeLeader(int partitionId) {
-        m_masterOfPartitions.add(partitionId);
-        ExportGeneration generation = m_generation.get();
-        if (generation == null) {
-            return;
-        }
-        generation.becomeLeader(partitionId);
     }
 
     protected ExportManager() {
@@ -178,6 +171,59 @@ public class ExportManager implements ExportManagerInterface
         updateProcessorConfig(connectors);
 
         exportLog.info(String.format("Export is enabled and can overflow to %s.", VoltDB.instance().getExportOverflowPath()));
+    }
+
+    @Override
+    public void startListeners(ClientInterface cif) {
+        m_ci = cif;
+
+        // Initialize adapter for partition leadership and start a listener
+        m_migratePartitionAdapter = new SimpleClientResponseAdapter(
+                ClientInterface.EXPORT_MANAGER_CID, getClass().getSimpleName());
+
+        cif.bindAdapter(m_migratePartitionAdapter, new ClientInterfaceRepairCallback() {
+
+            @Override
+            public void repairCompleted(int partitionId, long initiatorHSId) {
+                handlePartitionLeader(partitionId, initiatorHSId);
+            }
+
+            @Override
+            public void leaderMigrated(int partitionId, long initiatorHSId) {
+                handlePartitionLeader(partitionId, initiatorHSId);
+            }
+
+            private void handlePartitionLeader(int partitionId, long initiatorHSId) {
+                if (partitionId == MpInitiator.MP_INIT_PID) {
+                    return;
+                }
+                onPartitionLeaderMigrated(isLocalHost(initiatorHSId), partitionId);
+            }
+
+            private boolean isLocalHost(long hsId) {
+                return CoreUtils.getHostIdFromHSId(hsId) == m_hostId;
+            }
+        });
+    }
+
+    synchronized void onPartitionLeaderMigrated(boolean isLeader, int partitionId) {
+        if (isLeader) {
+            if (exportLog.isDebugEnabled()) {
+                exportLog.debug("Acquire leadership of partition " + partitionId);
+            }
+            m_masterOfPartitions.add(partitionId);
+            ExportGeneration generation = m_generation.get();
+            if (generation == null) {
+                return;
+            }
+            generation.becomeLeader(partitionId);
+        }
+        else {
+            if (exportLog.isDebugEnabled()) {
+                exportLog.debug("Lost leadership of partition " + partitionId);
+            }
+            m_masterOfPartitions.remove(partitionId);
+        }
     }
 
     public HostMessenger getHostMessenger() {
@@ -604,28 +650,33 @@ public class ExportManager implements ExportManagerInterface
     }
 
     @Override
-    public void clientInterfaceStarted(ClientInterface clientInterface) {
-        m_ci = clientInterface;
-        m_adapter = new SimpleClientResponseAdapter(ClientInterface.MIGRATE_ROWS_DELETE_CID,
-                                                    "MigrateRowsAdapter");
-        m_ci.bindAdapter(m_adapter, null);
-    }
-
-    @Override
     public void invokeMigrateRowsDelete(int partition, String tableName, long deletableTxnId,  ProcedureCallback cb) {
         m_ci.getDispatcher().getInternelAdapterNT().callProcedure(m_ci.getInternalUser(), true, TTLManager.NT_PROC_TIMEOUT, cb,
                 "@MigrateRowsDeleterNT", new Object[] {partition, tableName, deletableTxnId});
     }
 
+    // Note: not synchronized as only needs to touch the semaphore and must not block {@code onClosedSource}
     @Override
-    public synchronized String canUpdateCatalog() {
-        if (m_dataSourcesClosing.isEmpty()) {
-            return null;
+    public void waitOnClosingSources() {
+        boolean locked = false;
+        try {
+            locked = m_allowCatalogUpdate.tryAcquire(UPDATE_CORE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (!locked && !m_dataSourcesClosing.isEmpty()) {
+                exportLog.warn("After " + UPDATE_CORE_TIMEOUT_SECONDS
+                        + " seconds, these export streams are still closing: "
+                        + m_dataSourcesClosing.keySet());
+            }
         }
-        else {
-            String msg = "Unable to update catalog, these export streams are still closing: "
-                    + m_dataSourcesClosing.keySet();
-            return msg;
+        catch (Exception ex) {
+            if (!m_dataSourcesClosing.isEmpty()) {
+                exportLog.warn("Unable to wait: " + ex + ", these export streams are still closing: "
+                        + m_dataSourcesClosing.keySet());
+            }
+        }
+        finally {
+            if (locked) {
+                m_allowCatalogUpdate.release();
+            }
         }
     }
 
@@ -636,6 +687,12 @@ public class ExportManager implements ExportManagerInterface
 
     @Override
     public synchronized void onClosingSource(String tableName, int partition) {
+        if (m_dataSourcesClosing.isEmpty()) {
+            if (exportLog.isDebugEnabled()) {
+                exportLog.debug("Locking catalog updates");
+            }
+            m_allowCatalogUpdate.acquireUninterruptibly();
+        }
         m_dataSourcesClosing.put(tableName, partition);
     }
 
@@ -650,5 +707,18 @@ public class ExportManager implements ExportManagerInterface
                 exportLog.debug("Closed untracked " + tableName + ", partition " + partition + " (ok on shutdown)");
             }
         }
+        if (removed && m_dataSourcesClosing.isEmpty()) {
+            if (exportLog.isDebugEnabled()) {
+                exportLog.debug("Unlocking catalog updates");
+            }
+            m_allowCatalogUpdate.release();
+        }
+    }
+
+    @Override
+    public synchronized void releaseResources(List<Integer> removedPartitions) {
+        if (m_generation.get() != null) {
+            m_generation.get().closeDataSources(removedPartitions);
+         }
     }
 }
